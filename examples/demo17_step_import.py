@@ -22,7 +22,7 @@ mm = 0.001  # unit helper: 1 mm in meters
 
 margin = 5*mm
 model = em.Simulation('STEP_Board_demo')  # create simulation container
-model.check_version('1.1.0') # Checks version compatibility.
+model.check_version('1.1.1') # Checks version compatibility.
 
 # STEPItems is a wrapper that loads geometries from a STEP file.
 # It can contain multiple solids, surfaces, edges, and points.
