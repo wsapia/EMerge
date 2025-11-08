@@ -155,8 +155,8 @@ def gaus_quad_tet(p: int) -> np.ndarray:
 
 @njit(types.Tuple((f8[:], f8[:], f8[:], i8[:]))(f8[:,:], i8[:,:], f8[:,:]), cache=True, nogil=True)
 def generate_int_points_tri(nodes: np.ndarray,
-                                triangles: np.ndarray,
-                                PTS: np.ndarray):
+                            triangles: np.ndarray,
+                            PTS: np.ndarray):
 
     nDPTs = PTS.shape[1]
     xall = np.zeros((nDPTs, triangles.shape[1]))
@@ -186,38 +186,7 @@ def generate_int_points_tri(nodes: np.ndarray,
 
     return xall_flat, yall_flat, zall_flat, shape
 
-@njit(types.Tuple((f8[:], f8[:], f8[:], i8[:]))(f8[:,:], i8[:,:], f8[:,:]), cache=True, nogil=True)
-def generate_int_points_tet(nodes: np.ndarray,
-                            tets: np.ndarray,
-                            PTS: np.ndarray):
 
-    nPTS = PTS.shape[1]
-    xall = np.zeros((nPTS, tets.shape[1]))
-    yall = np.zeros((nPTS, tets.shape[1]))
-    zall = np.zeros((nPTS, tets.shape[1]))
-
-    for it in range(tets.shape[1]):
-        
-        vertex_ids = tets[:, it]
-
-        x1, x2, x3, x4 = nodes[0, vertex_ids]
-        y1, y2, y3, y4 = nodes[1, vertex_ids]
-        z1, z2, z3, z4 = nodes[2, vertex_ids]
-
-        xspts = x1*PTS[1,:] + x2*PTS[2,:] + x3*PTS[3,:] + x4*PTS[4,:]
-        yspts = y1*PTS[1,:] + y2*PTS[2,:] + y3*PTS[3,:] + y4*PTS[4,:]
-        zspts = z1*PTS[1,:] + z2*PTS[2,:] + z3*PTS[3,:] + z4*PTS[4,:]
-
-        xall[:, it] = xspts
-        yall[:, it] = yspts
-        zall[:, it] = zspts
-
-    xall_flat = xall.flatten()
-    yall_flat = yall.flatten()
-    zall_flat = zall.flatten()
-    shape = np.array((nPTS, tets.shape[1]))
-
-    return xall_flat, yall_flat, zall_flat, shape
 
 @njit(f8(f8[:], f8[:]), cache=True, fastmath=True, nogil=True)
 def dot(a: np.ndarray, b: np.ndarray) -> float:
@@ -513,3 +482,76 @@ def area(x1: np.ndarray, x2: np.ndarray, x3: np.ndarray):
     e2 = x3 - x1
     av = np.array([e1[1]*e2[2] - e1[2]*e2[1], e1[2]*e2[0] - e1[0]*e2[2], e1[0]*e2[1] - e1[1]*e2[0]])
     return np.sqrt(av[0]**2 + av[1]**2 + av[2]**2)/2
+
+
+@njit(types.Tuple((f8[:], f8[:], f8[:], f8[:], f8[:], i8[:]))(f8[:,:], i8[:,:], f8[:,:]), cache=True, nogil=True)
+def generate_int_data_tri(nodes: np.ndarray,
+                          triangles: np.ndarray,
+                          PTS: np.ndarray):
+
+    nDPTs = PTS.shape[1]
+    xall = np.zeros((nDPTs, triangles.shape[1]))
+    yall = np.zeros((nDPTs, triangles.shape[1]))
+    zall = np.zeros((nDPTs, triangles.shape[1]))
+    wall = np.zeros((nDPTs, triangles.shape[1]))
+    aall = np.zeros((nDPTs, triangles.shape[1]))
+    for it in range(triangles.shape[1]):
+        
+        vertex_ids = triangles[:, it]
+
+        x1, x2, x3 = nodes[0, vertex_ids]
+        y1, y2, y3 = nodes[1, vertex_ids]
+        z1, z2, z3 = nodes[2, vertex_ids]
+
+        xspts = x1*PTS[1,:] + x2*PTS[2,:] + x3*PTS[3,:]
+        yspts = y1*PTS[1,:] + y2*PTS[2,:] + y3*PTS[3,:]
+        zspts = z1*PTS[1,:] + z2*PTS[2,:] + z3*PTS[3,:]
+
+        xall[:, it] = xspts
+        yall[:, it] = yspts
+        zall[:, it] = zspts
+        wall[:, it] = PTS[0,:]
+        aall[:, it] = calc_area(nodes[:,vertex_ids[0]], nodes[:,vertex_ids[1]], nodes[:,vertex_ids[2]])
+
+    xall_flat = xall.flatten()
+    yall_flat = yall.flatten()
+    zall_flat = zall.flatten()
+    wall_flat = wall.flatten()
+    aall_flat = aall.flatten()
+    
+    shape = np.array((nDPTs, triangles.shape[1]))
+
+    return xall_flat, yall_flat, zall_flat, wall_flat, aall_flat, shape
+
+@njit(types.Tuple((f8[:], f8[:], f8[:], i8[:]))(f8[:,:], i8[:,:], f8[:,:]), cache=True, nogil=True)
+def generate_int_points_tet(nodes: np.ndarray,
+                            tets: np.ndarray,
+                            PTS: np.ndarray):
+
+    nPTS = PTS.shape[1]
+    xall = np.zeros((nPTS, tets.shape[1]))
+    yall = np.zeros((nPTS, tets.shape[1]))
+    zall = np.zeros((nPTS, tets.shape[1]))
+
+    for it in range(tets.shape[1]):
+        
+        vertex_ids = tets[:, it]
+
+        x1, x2, x3, x4 = nodes[0, vertex_ids]
+        y1, y2, y3, y4 = nodes[1, vertex_ids]
+        z1, z2, z3, z4 = nodes[2, vertex_ids]
+
+        xspts = x1*PTS[1,:] + x2*PTS[2,:] + x3*PTS[3,:] + x4*PTS[4,:]
+        yspts = y1*PTS[1,:] + y2*PTS[2,:] + y3*PTS[3,:] + y4*PTS[4,:]
+        zspts = z1*PTS[1,:] + z2*PTS[2,:] + z3*PTS[3,:] + z4*PTS[4,:]
+
+        xall[:, it] = xspts
+        yall[:, it] = yspts
+        zall[:, it] = zspts
+
+    xall_flat = xall.flatten()
+    yall_flat = yall.flatten()
+    zall_flat = zall.flatten()
+    shape = np.array((nPTS, tets.shape[1]))
+
+    return xall_flat, yall_flat, zall_flat, shape

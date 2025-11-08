@@ -20,7 +20,7 @@ from ...simulation_data import BaseDataset, DataContainer
 from ...elements.femdata import FEMBasis
 from dataclasses import dataclass, field
 import numpy as np
-from typing import Literal
+from typing import Literal, Callable
 from loguru import logger
 from .adaptive_freq import SparamModel
 from ...cs import Axis, _parse_axis
@@ -373,6 +373,7 @@ class EHField:
     er: np.ndarray
     ur: np.ndarray
     aux: dict[str, np.ndarray] = field(default_factory=dict)
+    
 
     @property
     def k0(self) -> float:
@@ -435,6 +436,14 @@ class EHField:
         return np.array([self.Dx, self.Dy, self.Dz])
     
     @property
+    def Smat(self) -> np.ndarray:
+        return np.array([self.Sx, self.Sy, self.Sz])
+    
+    @property
+    def Smmat(self) -> np.ndarray:
+        return np.array([self.Smx, self.Smy, self.Smz])
+    
+    @property
     def EH(self) -> tuple[np.ndarray, np.ndarray]:
         ''' Return the electric and magnetic field as a tuple of numpy arrays '''
         return np.array([self.Ex, self.Ey, self.Ez]), np.array([self.Hx, self.Hy, self.Hz])
@@ -455,6 +464,18 @@ class EHField:
     @property
     def Sz(self) -> np.ndarray:
         return self.Ex*self.Hy - self.Ey*self.Hx
+    
+    @property
+    def Smx(self) -> np.ndarray:
+        return 0.5*(self.Ey*np.conj(self.Hz) - self.Ez*np.conj(self.Hy))
+    
+    @property
+    def Smy(self) -> np.ndarray:
+        return 0.5*(self.Ez*np.conj(self.Hx) - self.Ex*np.conj(self.Hz))
+    
+    @property
+    def Smz(self) -> np.ndarray:
+        return 0.5*(self.Ex*np.conj(self.Hy) - self.Ey*np.conj(self.Hx))
     
     @property
     def B(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -480,6 +501,11 @@ class EHField:
     def S(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         ''' Return the poynting vector field as a tuple of numpy arrays '''
         return self.Sx, self.Sy, self.Sz
+    
+    @property
+    def Sm(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        ''' Return the poynting vector field as a tuple of numpy arrays '''
+        return self.Smx, self.Smy, self.Smz
     
     @property
     def normE(self) -> np.ndarray:
@@ -515,6 +541,20 @@ class EHField:
         """The complex norm of the S-field
         """
         return np.sqrt(np.abs(self.Sx)**2 + np.abs(self.Sy)**2 + np.abs(self.Sz)**2)
+    
+    def _get_quantity(self, field: str, metric: str) -> np.ndarray:
+        field_arry = getattr(self, field)
+        if metric=='abs':
+            field = np.abs(field_arry)
+        elif metric=='real':
+            field = field_arry.real
+        elif metric=='imag':
+            field = field_arry.imag
+        elif metric=='complex':
+            field = field_arry
+        else:
+            field = field_arry
+        return field
     
     def vector(self, field: Literal['E','H'], metric: Literal['real','imag','complex'] = 'real') -> tuple[np.ndarray, np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """Returns the X,Y,Z,Fx,Fy,Fz data to be directly cast into plot functions.
@@ -565,6 +605,17 @@ class EHField:
             field = field_arry
         return self.x, self.y, self.z, field_arry
 
+    def int(self, field: str | Callable, metric: Literal['abs','real','imag','complex',''] = '') -> float | complex:
+        if isinstance(field, Callable):
+            field = field(self)
+        else:
+            field = self._get_quantity(field, metric)
+        if len(field.shape)==2:
+            axis = 1
+        else:
+            axis = 0
+        return np.sum(field*self.aux['areas']*self.aux['weights'], axis=axis)
+    
 class _EHSign:
     """A small class to manage the sign of field components when computing the far-field with Stratton-Chu
     """
@@ -789,6 +840,21 @@ class MWField:
         
         error_tet, max_elem_size = compute_error_estimate(self, solve_ids)
         return error_tet, max_elem_size
+    
+    def integrate(self, surface: FaceSelection, gqo: int = 4) -> EHField:
+        from ...mth.optimized import generate_int_data_tri
+        from ...mth.integrals import gaus_quad_tri
+        
+        DPTS = gaus_quad_tri(gqo)
+        tris = self.mesh.get_triangles(surface.tags)
+        
+        X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
+        
+        field = self.interpolate(X, Y, Z, False)
+        field.aux['areas'] = A
+        field.aux['weights'] = W
+
+        return field
         
     def boundary(self,
                  selection: FaceSelection) -> EHField:

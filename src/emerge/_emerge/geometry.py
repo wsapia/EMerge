@@ -638,12 +638,14 @@ class GeoObject:
         
         return FaceSelection(self._face_tags(name, tool))._named(name)
 
-    def all_faces(self) -> list[FaceSelection]:
+    def all_faces(self, tool: GeoObject | None = None) -> list[FaceSelection]:
         """Returns a list of all face selections of this object
 
         Returns:
             list[FaceSelection]: A list of all face selections
         """
+        if tool is not None:
+            return [self.face(name, tool=tool) for name in self._tools[tool._key].keys()]
         return [self.face(name) for name in self._face_pointers]
     
     def faces(self, *names: FaceNames, tool: GeoObject | None = None) -> FaceSelection:

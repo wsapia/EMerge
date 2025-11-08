@@ -998,7 +998,9 @@ class SimulationBeta(Simulation):
         
         if passed < min_refined_passes:
             logger.warning('Adaptive mesh refinement did not converge!')
-        
+            
+        if show_mesh:
+                self.view(plot_mesh=True, volume_mesh=True)
         old = self.state.reload()
         return old
     
