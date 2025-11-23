@@ -63,7 +63,7 @@ class _GeometryManager:
     def set_geometries(self, geos: list[GeoObject], model: str | None = None):
         if model is None:
             model = self.active
-        self.geometry_list[model] = geos
+        self.geometry_list[model] = {geo.name: geo for geo in geos}
         
     def all_names(self, model: str | None = None) -> set[str]:
         if model is None:

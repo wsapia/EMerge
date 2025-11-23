@@ -30,6 +30,8 @@ import numpy as np
 import pyvista as pv
 from typing import Iterable, Literal, Callable, Any
 from loguru import logger
+from pathlib import Path
+from importlib.resources import files
 
 ### Color scale
 
@@ -254,6 +256,7 @@ class PVDisplay(BaseDisplay):
         self._selector: ScreenSelector = ScreenSelector(self)
         self._stop = False
         self._objs = []
+        self._data_sets: list[pv.DataSet] = []
 
         self._plot = pv.Plotter()
 
@@ -275,6 +278,11 @@ class PVDisplay(BaseDisplay):
         self._cbar_args = dict(title=name, n_labels=n_labels, interactive=interactive)
         self._cbar_lim = clim
         return self
+    
+    def _wrap_plot(self, *args, **kwargs) -> pv.Actor:
+        actor = self._plot.add_mesh(*args, **kwargs)
+        self._data_sets.append(actor.mapper.dataset)
+        return actor
     
     def _reset_cbar(self) -> None:
         self._cbar_args: dict = {}
@@ -341,6 +349,7 @@ class PVDisplay(BaseDisplay):
         self._stop = False
         self._objs = []
         self._animate_next = False
+        self._data_sets = []
         self._reset_cbar()
         C_CYCLE.reset()
 
@@ -482,7 +491,35 @@ class PVDisplay(BaseDisplay):
     def _mesh(self) -> Mesh3D:
         return self._state.mesh
     
-    def add_object(self, obj: GeoObject | Selection, mesh: bool = False, volume_mesh: bool = True, label: bool = False, *args, **kwargs):
+    def save_vtk(self, base_path: str) -> None:
+        """Saves all the plot object into a directory with the given path to a series of .vtk files.
+
+        Args:
+            base_path (str): The base path without extensions.
+        """
+        if len(self._data_sets)==0:
+            logger.error('No VTK objects to save. Make sure to call this method "before" calling .show().')
+        base = Path(base_path)
+        if base.suffix.lower() == ".vtk":
+            base = base.with_suffix("")
+
+        # ensure directory exists
+        base.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f'Saving VTK files to {base}')
+        # save numbered files
+        for idx, vtkobj in enumerate(self._data_sets, start=1):
+            filename = base / f"{idx}.vtk"
+            vtkobj.save(str(filename))
+            logger.debug(f'Saved VTK object to {filename}.')
+        logger.info('VTK saving complete!')
+        
+    def add_object(self, obj: GeoObject | Selection, 
+                   mesh: bool = False, 
+                   volume_mesh: bool = True, 
+                   label: bool = False, 
+                   label_text: str | None = None, 
+                   texture: str | None = None, *args, **kwargs):
         
         if isinstance(obj, GeoObject):
             if obj._hidden:
@@ -514,7 +551,8 @@ class PVDisplay(BaseDisplay):
             color=next(C_CYCLE)
         
         # Defining the default keyword arguments for PyVista
-        kwargs = setdefault(kwargs, color=color, 
+        kwargs = setdefault(kwargs, 
+                            color=color, 
                             opacity=opacity, 
                             metallic=metallic, 
                             pbr=pbr,
@@ -528,9 +566,22 @@ class PVDisplay(BaseDisplay):
         
         mesh_obj = self.mesh(obj)
         
+        if texture is not None and texture != 'None':
+            from .utils import determine_projection_data
+            directory = Path(files('emerge')) / '_emerge' / 'plot' / 'pyvista' / 'textures' / texture
+            if directory.is_file():
+                tex_image = pv.read_texture(directory)
+                kwargs['texture'] = tex_image
+                output = mesh_obj.point_data
+                origin = output.dataset.center
+                points = output.dataset.points.T
+                tris = output.dataset.cells_dict[5].T
+                origin, u, v = determine_projection_data(points, tris)
+                mesh_obj.texture_map_to_plane(origin, origin+u, origin+v, inplace=True)
+            
         if mesh is True and volume_mesh is True:
             mesh_obj = mesh_obj.extract_all_edges()
-        actor = self._plot.add_mesh(mesh_obj, *args, **kwargs)
+        actor = self._wrap_plot(mesh_obj, *args, **kwargs)
         
         # Push 3D Geometries back to avoid Z-fighting with 2D geometries.
         if obj.dim==3:
@@ -543,9 +594,13 @@ class PVDisplay(BaseDisplay):
         if label:
             points = []
             labels = []
-            for dt in obj.dimtags:
-                points.append(self._mesh.dimtag_to_center[dt])
-                labels.append(obj.name)
+            label_text = obj.name if label_text is None else label_text
+            for dim, tag in obj.dimtags:
+                if dim==2:
+                    points.append(self._mesh.ftag_to_point[tag])
+                else:
+                    points.append(self._mesh.dimtag_to_center[(dim, tag)])
+                labels.append(label_text)
             self._plot.add_point_labels(points, labels, shape_color='white')
             
     def add_objects(self, *objects, **kwargs) -> None:
@@ -563,6 +618,7 @@ class PVDisplay(BaseDisplay):
             zs (np.ndarray): The Z-coordinate
         """
         cloud = pv.PolyData(np.array([xs,ys,zs]).T)
+        self._data_sets.append(cloud)
         self._plot.add_points(cloud)
 
     def add_portmode(self, port: PortBC, 
@@ -632,13 +688,16 @@ class PVDisplay(BaseDisplay):
         else:
             F = np.real(F.T)
             Fnorm = np.sqrt(Fx.real**2 + Fy.real**2 + Fz.real**2).T
+        
         if XYZ is not None:
             grid = pv.StructuredGrid(X,Y,Z)
             self.add_surf(X,Y,Z,Fnorm, _fieldname = 'portfield')
-            self._plot.add_mesh(grid, scalars = Fnorm.T, opacity=0.8, pickable=False)
+            self._wrap_plot(grid, scalars = Fnorm.T, opacity=0.8, pickable=False)
 
         Emag = F/np.max(Fnorm.flatten())*d*3
-        self._plot.add_arrows(np.array([xf,yf,zf]).T, Emag)
+        actor = self._plot.add_arrows(np.array([xf,yf,zf]).T, Emag)
+        self._data_sets.append(actor.mapper.dataset)
+        
 
     def add_surf(self, 
                  x: np.ndarray,
@@ -651,7 +710,7 @@ class PVDisplay(BaseDisplay):
                  opacity: float = 1.0,
                  symmetrize: bool = False,
                  _fieldname: str | None = None,
-                 **kwargs,):
+                 **kwargs,) -> pv.DataSet:
         """Add a surface plot to the display
         The X,Y,Z coordinates must be a 2D grid of data points. The field must be a real field with the same size.
 
@@ -688,7 +747,7 @@ class PVDisplay(BaseDisplay):
         self._ctr += 1
         
         grid[name] = static_field
-
+        
         grid_no_nan = grid.threshold(scalars=name)
         
         default_cmap = EMERGE_AMP
@@ -710,9 +769,8 @@ class PVDisplay(BaseDisplay):
             cmap = default_cmap
         
         kwargs = setdefault(kwargs, cmap=cmap, clim=clim, opacity=opacity, pickable=False, multi_colors=True)
-        actor = self._plot.add_mesh(grid_no_nan, scalars=name, scalar_bar_args=self._cbar_args, **kwargs)
-
-
+        actor = self._wrap_plot(grid_no_nan, scalars=name, scalar_bar_args=self._cbar_args, **kwargs)
+        
         if self._animate_next:
             def on_update(obj: _AnimObject, phi: complex):
                 field_anim = obj.T(np.real(obj.field * phi))
@@ -722,6 +780,7 @@ class PVDisplay(BaseDisplay):
             self._objs.append(_AnimObject(field_flat, T, grid, grid_no_nan, actor, on_update))
             self._animate_next = False
         self._reset_cbar()
+        return grid_no_nan
     
     def add_boundary_field(self, 
                  selection: FaceSelection,
@@ -793,7 +852,7 @@ class PVDisplay(BaseDisplay):
             cmap = default_cmap
         
         kwargs = setdefault(kwargs, cmap=cmap, clim=clim, opacity=opacity, pickable=False, multi_colors=True)
-        actor = self._plot.add_mesh(grid, scalars=name, scalar_bar_args=self._cbar_args, **kwargs)
+        actor = self._wrap_plot(grid, scalars=name, scalar_bar_args=self._cbar_args, **kwargs)
 
         if self._animate_next:
             def on_update(obj: _AnimObject, phi: complex):
@@ -880,6 +939,7 @@ class PVDisplay(BaseDisplay):
             kwargs['color'] = color
             
         pl = self._plot.add_arrows(Coo, Vec, scalars=None, clim=None, cmap=cmap, **kwargs)
+        self._data_sets.append(pl.mapper.dataset)
         self._reset_cbar()
         
     def add_contour(self,
@@ -941,7 +1001,7 @@ class PVDisplay(BaseDisplay):
         levels = list(np.linspace(vmin, vmax, Nlevels))
         contour = grid.contour(isosurfaces=levels)
         
-        actor = self._plot.add_mesh(contour, opacity=opacity, cmap=cmap, clim=clim, pickable=False, scalar_bar_args=self._cbar_args)
+        actor = self._wrap_plot(contour, opacity=opacity, cmap=cmap, clim=clim, pickable=False, scalar_bar_args=self._cbar_args)
         
         if self._animate_next:
             def on_update(obj: _AnimObject, phi: complex):

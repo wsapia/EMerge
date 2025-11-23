@@ -18,13 +18,10 @@
 from __future__ import annotations
 import gmsh # type: ignore
 import numpy as np
-from .mesher import Mesher
 from typing import Union, List, Tuple, Callable, Any
 from collections import defaultdict
-from .geometry import GeoVolume
 from loguru import logger
 from .bc import Periodic
-from .material import Material
 from .logsettings import DEBUG_COLLECTOR
 
 _MISSING_ID: int = -1234
@@ -139,6 +136,10 @@ class Mesh3D(Mesh):
         ## Dervied
         self.dimtag_to_center: dict[tuple[int, int], tuple[float, float, float]] = dict()
         self.dimtag_to_edges: dict[tuple[int, int], np.ndarray] = dict()
+        self.dimtag_to_nodes: dict[tuple[int, int], np.ndarray] = dict()
+        self.dimtag_to_bb: dict[tuple[int, int], np.ndarray] = dict()
+        self.ftag_to_normal: dict[int, np.ndarray] = dict()
+        self.ftag_to_point: dict[int, np.ndarray] = dict()
         
         self.exterior_face_tags: list[int] = []
     
@@ -513,14 +514,15 @@ class Mesh3D(Mesh):
             node_tags = np.squeeze(np.array(node_tags)).reshape(-1,3).T
             self.ftag_to_tri[t] = [self.get_tri(node_tags[0,i], node_tags[1,i], node_tags[2,i]) for i in range(node_tags.shape[1])]
             self.ftag_to_edge[t] = sorted(list(np.unique(self.tri_to_edge[:,self.ftag_to_tri[t]].flatten())))
-        
+            self.ftag_to_normal[t] = gmsh.model.get_normal(t, np.array([0,0]))
+            
         vol_dimtags = gmsh.model.get_entities(3)
         for _d,t in vol_dimtags:
             domain_tag, v_tags, node_tags = gmsh.model.mesh.get_elements(3, t)
             node_tags = [self.n_t2i[int(t)] for t in node_tags[0]]
             node_tags = np.squeeze(np.array(node_tags)).reshape(-1,4).T
             self.vtag_to_tet[t] = [self.get_tet(node_tags[0,i], node_tags[1,i], node_tags[2,i], node_tags[3,i]) for i in range(node_tags.shape[1])]
-
+            
         self.defined = True
         
 
@@ -529,10 +531,16 @@ class Mesh3D(Mesh):
         ############################################################
 
         for dim in (0,1,2,3):
-            dts= gmsh.model.get_entities(dim)
+            dts = gmsh.model.get_entities(dim)
             for dt in dts:
                 self.dimtag_to_center[dt] = gmsh.model.occ.get_center_of_mass(*dt)
                 self.dimtag_to_edges[dt] = self._domain_edge(dt)
+                self.dimtag_to_nodes[dt] = np.array([self.n_t2i[gmsh.model.mesh.get_nodes(*dt)[0][0]] for dt in gmsh.model.get_boundary([dt,], True, False, True)])
+                self.dimtag_to_bb[dt] = np.array(gmsh.model.occ.get_bounding_box(*dt))
+                if dim==2:
+                    center = self.dimtag_to_center[dt]
+                    xyz, _ = gmsh.model.get_closest_point(*dt, center)
+                    self.ftag_to_point[dt[1]] = np.array(xyz)
                 
         logger.trace('Finalized mesh data generation!')
 
@@ -587,41 +595,6 @@ class Mesh3D(Mesh):
 
         return conv_map, np.array(node_ids_2_unsorted), np.array(node_ids_2_sorted)
 
-
-    def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
-        '''Retrieve the material properties of the geometry'''
-        #arry = np.zeros((3,3,self.n_tets,), dtype=np.complex128)
-        for vol in volumes:
-            vol.material.reset()
-        
-        materials = []
-        i = 0
-        for vol in volumes:
-            if vol.material not in materials:
-                materials.append(vol.material)
-                vol.material._hash_key = i
-                i += 1
-            
-        xs = self.centers[0,:]
-        ys = self.centers[1,:]
-        zs = self.centers[2,:]
-        
-        matassign = -1*np.ones((self.n_tets,), dtype=np.int64)
-        
-        for volume in sorted(volumes, key=lambda x: x._priority):
-        
-            for dimtag in volume.dimtags:
-                etype, etag_list, ntags = gmsh.model.mesh.get_elements(*dimtag)
-                for etags in etag_list:
-                    tet_ids = np.array([self.tet_t2i[t] for t in etags])
-                    matassign[tet_ids] = volume.material._hash_key
-        
-        for mat in materials:
-            ids = np.argwhere(matassign==mat._hash_key).flatten()
-            mat.initialize(xs[ids], ys[ids], zs[ids], ids)
-                    
-        
-        return materials
     
     def plot_gmsh(self) -> None:
         gmsh.fltk.run()

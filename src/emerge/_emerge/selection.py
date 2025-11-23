@@ -93,6 +93,44 @@ def align_rectangle_frame(pts3d: np.ndarray, normal: np.ndarray) -> dict[str, An
       "corners": np.array(corners).reshape(4,3)
     }
 
+def align_rectangle_frame_new(pts3d: np.ndarray, normal: np.ndarray) -> dict[str, Any]:
+    """Find a rectangle frame by using the 4 most 'extreme' points.
+
+    Heuristic:
+      1) Score each point by the sum of distances to all other points.
+      2) Take the 4 points with the highest scores as the rectangle corners.
+      3) From those 4 points, derive center, axes (u: shortest edge, v: longest edge, n: normal),
+         and the 4 corner positions.
+
+    Assumes the point cloud actually samples a rectangle in the plane with the given normal.
+    """
+
+    center_ap = np.mean(pts3d, axis=1)
+    dist = ((pts3d[0,:]-center_ap[0])**2 + (pts3d[1,:] - center_ap[1])**2 + (pts3d[2,:] - center_ap[2])**2)**0.5
+    
+    ids = np.argsort(dist)[-4:]
+    
+    c1 = pts3d[:,ids[0]]
+    c2 = pts3d[:,ids[1]]
+    c3 = pts3d[:,ids[2]]
+    c4 = pts3d[:,ids[3]]
+    
+    origin = (c1+c2+c3+c4)/4
+    
+    c_close, c_diag, c_far = sorted([c2, c3, c4], key= lambda x: np.linalg.norm(x-c1))
+    
+    v = c_close-c1
+    u = c_far-c1
+    v = v/np.linalg.norm(v)
+    u = u/np.linalg.norm(u)
+    n = np.cross(u ,v)
+    
+    return {
+        "origin": origin,
+        "axes": (v, u, n),
+        "corners": np.array([c1, c_close, c_diag, c_far]).T,
+    }
+    
 TSelection = TypeVar("TSelection", bound="Selection")
 
 # Your custom alphabet
@@ -104,6 +142,30 @@ ALPHABET = (
 # Map char → int and int → char
 CHAR_TO_VAL = {ch: i for i, ch in enumerate(ALPHABET)}
 VAL_TO_CHAR = {i: ch for i, ch in enumerate(ALPHABET)}
+
+class _CalculationInterface:
+    
+    def __init__(self):
+        self._ifobj = None
+
+    def getCenterOfMass(self, dim: int, tag: int) -> np.ndarray:
+        return self._ifobj.getCenterOfMass(dim, tag)
+    
+    def getPoints(self, dimtags: list[tuple[int, int]]) -> list[np.ndarray]:
+        return self._ifobj.getPoints(dimtags)
+    
+    def getBoundingBox(self, dim: int, tag: int) -> tuple[float, float, float, float, float, float]:
+        return self._ifobj.getBoundingBox(dim, tag)
+    
+    def getNormal(self, facetag: int) -> np.ndarray:
+       
+        return self._ifobj.getNormal(facetag)
+    
+    def getCharPoint(self, facetag: int) -> np.ndarray:
+        
+        return self._ifobj.getCharPoint(facetag)
+
+_CALC_INTERFACE = _CalculationInterface()
 
 def encode_data(values: tuple[float,...]) -> str:
     """
@@ -171,6 +233,7 @@ def decode_data(encoded: str) -> tuple[float,...]:
     # Convert back to float64 for higher precision
     return tuple(np.array(arr, dtype=np.float64))
 
+
 class Selection:
     """A generalized class representing a slection of tags.
 
@@ -179,12 +242,11 @@ class Selection:
     def __init__(self, tags: list[int] | set[int] | tuple[int] | None = None):
         self.name: str = 'Selection'
         self._tags: set[int] = set()
-
         if tags is not None:
             if not isinstance(tags, (list,set,tuple)):
                 raise TypeError(f'Argument tags must be of type list, tuple or set, instead its {type(tags)}')
             self._tags = set(tags)
-    
+
     @staticmethod
     def from_dim_tags(dim: int, tags: list[int] | set[int]) -> Selection:
         if dim==0:
@@ -198,6 +260,12 @@ class Selection:
         raise ValueError(f'Dimension must be 0,1,2 or 3. Not {dim}')
     
     @property
+    def invalid(self) -> bool:
+        if len(self._tags)==0:
+            return True
+        return False
+    
+    @property
     def tags(self) -> list[int]:
         return list(self._tags)
     
@@ -207,7 +275,7 @@ class Selection:
     
     @property
     def centers(self) -> list[tuple[float, float, float],]:
-        return [gmsh.model.occ.get_center_of_mass(self.dim, tag) for tag in self.tags]
+        return [_CALC_INTERFACE.getCenterOfMass(self.dim, tag) for tag in self.tags]
     
     @property
     def _metal(self) -> bool:
@@ -228,26 +296,25 @@ class Selection:
     @property
     def center(self) -> np.ndarray | list[np.ndarray]:
         if len(self.tags)==1:
-            return gmsh.model.occ.getCenterOfMass(self.dim, self.tags[0])
+            return _CALC_INTERFACE.getCenterOfMass(self.dim, self.tags[0])
         else:
-            return [gmsh.model.occ.getCenterOfMass(self.dim, tag) for tag in self.tags]
+            return [_CALC_INTERFACE.getCenterOfMass(self.dim, tag) for tag in self.tags]
     
     @property
     def points(self) -> list[np.ndarray]:
         '''A list of 3D coordinates of all nodes comprising the selection.'''
-        points = gmsh.model.get_boundary(self.dimtags, recursive=True)
-        coordinates = [gmsh.model.getValue(*p, []) for p in points]
-        return coordinates
+        return _CALC_INTERFACE.getPoints(self.dimtags)
     
     @property
     def bounding_box(self) -> tuple[Iterable, Iterable]:
         if len(self.tags)==1:
-            return gmsh.model.occ.getBoundingBox(self.dim, self.tags[0])
+            x1, y1, z1, x2, y2, z2 = _CALC_INTERFACE.getBoundingBox(self.dim, self.tags[0])
+            return (x1, y1, z1), (x2, y2, z2)
         else:
             minx = miny = minz = 1e10
             maxx = maxy = maxz = -1e10
             for tag in self.tags:
-                x0, y0, z0, x1, y1, z1 = gmsh.model.occ.getBoundingBox(self.dim, tag)
+                x0, y0, z0, x1, y1, z1 = _CALC_INTERFACE.getBoundingBox(self.dim, tag)
                 minx = min(minx, x0)
                 miny = min(miny, y0)
                 minz = min(minz, z0)
@@ -255,6 +322,18 @@ class Selection:
                 maxy = max(maxy, y1)
                 maxz = max(maxz, z1)
             return (minx, miny, minz), (maxx, maxy, maxz)
+    
+    def remove_tags(self, tags: list[int]) -> Selection:
+        """Removes a set of tags from the selection
+
+        Args:
+            tags (list[int]): _description_
+
+        Returns:
+            Selection: _description_
+        """
+        self._tags = self._tags.difference(set(tags))
+        return self
     
     def _named(self, name: str) -> Selection:
         """Sets the name of the selection and returns it
@@ -280,11 +359,11 @@ class Selection:
         Returns:
             Selection: This Selection modified without the excluded points.
         """
-        include = [~xyz_excl_function(*gmsh.model.occ.getCenterOfMass(*tag)) for tag in self.dimtags]
+        include = [~xyz_excl_function(*point) for point in self.centers]
         
         if axis is not None:
             norm = axis.np
-            include2 = [abs(gmsh.model.getNormal(tag, np.array([0,0]))@norm)<0.9 for tag in self.tags]
+            include2 = [abs(_CALC_INTERFACE.getNormal(tag) @ norm) < 0.9 for tag in self.tags]
             include = [i1 for i1, i2 in zip(include, include2) if i1 and i2]
         self._tags = set([t for incl, t in zip(include, self._tags) if incl])
         return self
@@ -301,11 +380,11 @@ class Selection:
         Returns:
             Selection: This Selection modified without the excluded points.
         """
-        include1 = [xyz_excl_function(*gmsh.model.occ.getCenterOfMass(*tag)) for tag in self.dimtags]
+        include1 = [xyz_excl_function(*_CALC_INTERFACE.getCenterOfMass(*dt)) for dt in self.dimtags]
         
         if axis is not None:
             norm = axis.np
-            include2 = [(gmsh.model.getNormal(tag, np.array([0,0]))@norm)>0.99 for tag in self.tags]
+            include2 = [(_CALC_INTERFACE.getNormal(tag) @ norm)>0.99 for tag in self.tags]
             include1 = [i1 for i1, i2 in zip(include1, include2) if i1 and i2]
         self._tags = set([t for incl, t in zip(include1, self._tags) if incl])
         return self
@@ -358,7 +437,7 @@ class FaceSelection(Selection):
     @property
     def normal(self) -> np.ndarray:
         ''' Returns a 3x3 coordinate matrix of the XY + out of plane basis matrix defining the face assuming it can be projected on a flat plane.'''
-        ns = [gmsh.model.getNormal(tag, np.array([0,0])) for tag in self.tags]
+        ns = [_CALC_INTERFACE.getNormal(tag) for tag in self.tags]
         return ns[0]
     
     def rect_basis(self) -> tuple[CoordinateSystem, tuple[float, float]]:

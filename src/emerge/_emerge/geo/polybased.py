@@ -615,6 +615,8 @@ class Disc(GeoSurface):
     def __init__(self, origin: tuple[float, float, float],
                  radius: float,
                  axis: tuple[float, float, float] = (0,0,1.0),
+                 radius_opt: float | None = None,
+                 axis_opt: tuple[float, float, float] | None = None,
                  name: str | None = None):
         """Creates a circular Disc surface.
 
@@ -622,8 +624,16 @@ class Disc(GeoSurface):
             origin (tuple[float, float, float]): The center of the disc
             radius (float): The radius of the disc
             axis (tuple[float, float, float], optional): The disc normal axis. Defaults to (0,0,1.0).
+            radius_opt (float, None): Secondary radius in case where one wants to make an ellipse.
         """
-        disc = gmsh.model.occ.addDisk(*origin, radius, radius, zAxis=axis)
+        if radius_opt is None:
+            radius_opt = radius
+            axis_opt = []
+        else:
+            if axis_opt is None:
+                raise ValueError('A secondary axis is required when making an ellipse')
+        
+        disc = gmsh.model.occ.addDisk(*origin, radius, radius_opt, zAxis=axis, xAxis=axis_opt)
         super().__init__(disc, name=name)
     
     

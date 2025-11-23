@@ -88,8 +88,8 @@ radiation_boundary = air2.faces('back','top','right', tool=air)  # open faces
 abc = m.mw.bc.AbsorbingBoundary(m.select.face.inplane(Lhorn-dx,0,0,plane=em.YZPLANE))
 
 # View mesh and BC selections
-m.view(selections=[p1.selection, PMC.selection, radiation_boundary])
 
+quit()
 # --- Run frequency-domain solver ----------------------------------------
 data = m.mw.run_sweep()
 

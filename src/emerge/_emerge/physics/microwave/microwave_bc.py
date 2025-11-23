@@ -113,7 +113,9 @@ class MWBoundaryConditionSet(BoundaryConditionSet):
 
 
 class PEC(BoundaryCondition):
-    
+    _color: str = "#f70a80"
+    _name: str = "PEC"
+    _texture: str = "tex1.png"
     def __init__(self,
                  face: FaceSelection | GeoSurface):
         """The general perfect electric conductor boundary condition.
@@ -126,10 +128,15 @@ class PEC(BoundaryCondition):
         super().__init__(face)
 
 class PMC(BoundaryCondition):
+    _color: str = "#0084ff"
+    _name: str = "PMC"
+    _texture: str = "tex4.png"
     pass
 
 class RobinBC(BoundaryCondition):
-    
+    _color: str = "#e7c736"
+    _name: str = "RobinBC"
+    _texture: str = "tex5.png"
     _include_stiff: bool = False
     _include_mass: bool = False
     _include_force: bool = False
@@ -166,6 +173,9 @@ class RobinBC(BoundaryCondition):
 
 class PortBC(RobinBC):
     Zvac: float = Z0
+    _color: str = "#e1bd1c"
+    _texture: str = "tex5.png"
+    _name: str = "PortBC"
     def __init__(self, face: FaceSelection | GeoSurface):
         """(DO NOT USE) A generalization of the Port boundary condition.
         
@@ -274,7 +284,9 @@ class AbsorbingBoundary(RobinBC):
     _include_mass: bool = True
     _include_force: bool = False
     _isabc: bool = True
-    
+    _color: str = "#1ce13d"
+    _name: str = "AbsorbingBC"
+    _texture: str = "tex3.png"
     def __init__(self,
                  face: FaceSelection | GeoSurface,
                  order: int = 2,
@@ -362,7 +374,9 @@ class FloquetPort(PortBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = True
-
+    _color: str = "#e1bd1c"
+    _texture: str = "tex5.png"
+    _name: str = "FloquetPort"
     def __init__(self,
                  face: FaceSelection | GeoSurface,
                  port_number: int,
@@ -454,7 +468,9 @@ class ModalPort(PortBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = True
-
+    _color: str = "#e1bd1c"
+    _texture: str = "tex5.png"
+    _name: str = "ModalPort"
     def __init__(self,
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -731,7 +747,9 @@ class RectangularWaveguide(PortBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = True
-
+    _color: str = "#e1bd1c"
+    _name: str = "RectWG"
+    _texture: str = "tex5.png"
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -856,7 +874,9 @@ class UserDefinedPort(PortBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = True
-
+    _color: str = "#be9f11"
+    _name: str = "UserDefined"
+    _texture: str = "tex5.png"
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -971,7 +991,9 @@ class LumpedPort(PortBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = True
-
+    _color: str = "#e1851c"
+    _name: str = "LumpedPort"
+    _texture: str = "tex5.png"
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -1112,7 +1134,8 @@ class LumpedElement(RobinBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = False
-
+    _color: str = "#e11c1c"
+    _name: str = "LumpedElement"
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  impedance_function: Callable | None = None,
@@ -1188,7 +1211,8 @@ class SurfaceImpedance(RobinBC):
     _include_stiff: bool = True
     _include_mass: bool = False
     _include_force: bool = False
-
+    _color: str = "#49e8ed"
+    _name: str = "SurfaceImpedance"
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  material: Material | None = None,

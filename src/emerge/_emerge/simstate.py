@@ -14,39 +14,59 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
-
-
+from __future__ import annotations
 from .mesh3d import Mesh3D
 from .geometry import GeoObject, _GeometryManager, _GEOMANAGER
 from .dataset import SimulationDataset
 from loguru import logger
-
 from typing import Any
+import numpy as np
+from .selection import _CALC_INTERFACE
+import gmsh
 
+class _SimStateCollection:
+    
+    def __init__(self):
+        self.states: list[SimState] = []
+        self.active: SimState | None = None
+
+    def sign_on(self, state: SimState) -> None:
+        if state not in self.states:
+            self.states.append(state)
+        self.active = state
+            
+_GLOBAL_SIMSTATES = _SimStateCollection()
 
 class SimState:
     
-    def __init__(self):
+    def __init__(self, modelname: str):
+        self.modelname: str = modelname
         self.mesh: Mesh3D = Mesh3D()
         self.geos: list[GeoObject] = []
         self.data: SimulationDataset = SimulationDataset()
         self.params: dict[str, float] = dict()
         self._stashed: SimulationDataset | None = None
         self.manager: _GeometryManager = _GEOMANAGER
+        self.sign_on()
     
+    def sign_on(self):
+        _GLOBAL_SIMSTATES.sign_on(self)
+        _CALC_INTERFACE._ifobj = self
+
     @property
     def current_geo_state(self) -> list[GeoObject]:
         return self.manager.all_geometries()
     
-    def reset_geostate(self, modelname: str) -> None:
-        _GEOMANAGER.reset(modelname)
+    def reset_geostate(self) -> None:
+        _GEOMANAGER.reset(self.modelname)
         self.clear_mesh()
         
-    def init(self, modelname: str) -> None:
+    def init(self) -> None:
         self.mesh = Mesh3D()
         self.geos = []
-        self.reset_geostate(modelname)
+        self.reset_geostate()
         self.init_data()
+        self.sign_on()
         
     def stash(self) -> None:
         self._stashed = self.data
@@ -65,9 +85,12 @@ class SimState:
         return old
     
     def reset_mesh(self) -> None:
+        """Resets and clears the current mesh.
+        """
         self.mesh = Mesh3D()
         
     def set_mesh(self, mesh: Mesh3D) -> None:
+        """ Overwrite the mesh with a new one."""
         self.mesh = mesh
         
     def set_geos(self, geos: list[GeoObject]) -> None:
@@ -103,4 +126,64 @@ class SimState:
         logger.info(f'Activated entry with variables: {variables}')
         self.set_mesh(dataset['mesh'])
         self.set_geos(dataset['geos'])
+        
         return self
+    
+    #GMSH Copies
+    def getCenterOfMass(self, dim: int, tag: int) -> np.ndarray:
+        if self.mesh.defined is False:
+            return gmsh.model.occ.getCenterOfMass(dim, tag)
+        return self.mesh.dimtag_to_center[(dim, tag)]
+    
+    def getPoints(self, dimtags: list[tuple[int, int]]) -> list[np.ndarray]:
+        """Returns a
+
+        Args:
+            dimtags (list[tuple[int, int]]): _description_
+
+        Returns:
+            list[np.ndarray]: _description_
+        """
+        points = []
+        id_set = []
+        for dt in dimtags:
+            id_set.append(self.mesh.dimtag_to_nodes[dt])
+        ids = np.unique(np.concatenate(id_set))
+        points = [self.mesh.nodes[:,i] for i in ids]
+        return points
+    
+    def getBoundingBox(self, dim: int, tag: int) -> tuple[float, float, float, float, float, float]:
+        """Returns the bounding box corresponding to entity defined by (dim,tag)
+
+        Args:
+            dim (int): _description_
+            tag (int): _description_
+
+        Returns:
+            tuple[float, float, float, float, float, float]: _description_
+        """
+        if self.mesh.defined is False:
+            return gmsh.model.occ.getBoundingBox(dim, tag)
+        return self.mesh.dimtag_to_bb[(dim, tag)]
+    
+    def getNormal(self, facetag: int) -> np.ndarray:
+        """Returns the normal vector of a facetag
+
+        Args:
+            facetag (int): _description_
+
+        Returns:
+            np.ndarray: _description_
+        """
+        return self.mesh.ftag_to_normal[facetag]
+    
+    def getCharPoint(self, facetag: int) -> np.ndarray:
+        """Returns a coordinate that is always on the surface and roughly in the center
+
+        Args:
+            facetag (int): _description_
+
+        Returns:
+            np.ndarray: _description_
+        """
+        return self.mesh.ftag_to_point[facetag]

@@ -155,6 +155,7 @@ with em.Simulation('FullFilter') as mf:
         mf.mesher.set_domain_size(ir, 2*mm)
     mf.generate_mesh()
 
+    mf.view()
     # Boundary conditions for feed ports
     p1 = mf.mw.bc.RectangularWaveguide(feed1.front, 1)
     p2 = mf.mw.bc.RectangularWaveguide(feed2.back, 2)

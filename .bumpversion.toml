@@ -82,3 +82,9 @@ filename = "examples/demo16_differential_common_mode.py"
 
 [[tool.bumpversion.files]]
 filename = "examples/demo17_step_import.py"
+
+[[tool.bumpversion.files]]
+filename = "examples/demo18_plotting_and_visualization.py"
+
+[[tool.bumpversion.files]]
+filename = "examples/demo19_vivaldi_antenna.py"

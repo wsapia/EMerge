@@ -105,7 +105,7 @@ model.mesher.set_face_size(p2, 0.5*mm)
 # --- Mesh generation and view --------------------------------------------
 model.generate_mesh()                    # build mesh
 model.view(plot_mesh=True)                             # visualize with Gmsh viewer
-em.geo.PCB
+
 # --- Boundary conditions ------------------------------------------------
 port1 = model.mw.bc.ModalPort(p1, 1, modetype='TEM')
 port2 = model.mw.bc.ModalPort(p2, 2, modetype='TEM')

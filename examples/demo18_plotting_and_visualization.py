@@ -30,6 +30,7 @@ distance = 2*mm
 # Setup the simulation
 
 m = em.Simulation('PlottingDemo')
+m.check_version("1.2.2")
 
 box = em.geo.Box(wgb, wga, L, (-wgb/2, -wga/2, -L))
 cut1 = em.geo.Box(wgb, wga*(1-opening)/2, th, (-wgb/2, -wga/2, -distance-th/2))
@@ -41,13 +42,13 @@ feed = em.geo.subtract(feed, cut2)
 halfsphere = em.geo.HalfSphere(rad, direction=(0,0,1))
 
 sphere = em.geo.Sphere(5*mm, (0,0,10*mm)).set_material(em.lib.COPPER) # This sphere is just for instersesting visuals and scattering.
-sphere.max_meshsize = 1*mm
+sphere.max_meshsize = 2*mm
 
 # The simplest way to view the geometry is to call the "view" method on our simulation object.
 # The view method can use the GMSH viewer or the EMerge PyVista viewer. 
 # As long as there is no mesh yet, EMerge can only use the GMSH viewer.
 
-#m.view()
+m.view()
 
 # We commit the geometry and generate the mesh.
 m.commit_geometry()
@@ -89,6 +90,9 @@ abc = halfsphere.outside
 my_port = m.mw.bc.RectangularWaveguide(feed.face('-z'), 1)
 m.mw.bc.AbsorbingBoundary(abc)
 
+# We can use the view method to also show our boundary conditions!
+m.view(bc=True)
+
 data = m.mw.run_sweep()
 
 glob = data.scalar.grid
@@ -122,7 +126,6 @@ plot_ff(ff_azi.ang*180/3.1415, [ff_azi.normE/em.EISO, ff_ele.normE/em.EISO], dB=
 # Or a polar plot
 
 plot_ff_polar(ff_azi.ang, [ff_azi.normE/em.EISO, ff_ele.normE/em.EISO], dB=True, labels=['E-plane','H-plane'])
-
 
 ############################################################
 #                         3D PLOTS                        #

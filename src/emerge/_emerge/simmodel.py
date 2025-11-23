@@ -16,12 +16,13 @@
 # <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-from .mesher import Mesher
+
+
 from .geometry import GeoObject
 from .geo.modeler import Modeler
 from .physics.microwave.microwave_3d import Microwave3D
 from .mesh3d import Mesh3D
-from .selection import Selector, Selection
+from .mesher import Mesher
 from .dataset import SimulationDataset
 from .logsettings import LOG_CONTROLLER, DEBUG_COLLECTOR
 from .plot.pyvista import PVDisplay
@@ -30,6 +31,7 @@ from .cacherun import get_build_section, get_run_section
 from .settings import DEFAULT_SETTINGS, Settings
 from .solver import EMSolver, Solver
 from .simstate import SimState
+from .selection import Selector, Selection
 from typing import Literal, Generator, Any
 from loguru import logger
 import numpy as np
@@ -96,7 +98,7 @@ class Simulation:
         self.mesher: Mesher = Mesher()
         self.modeler: Modeler = Modeler()
         
-        self.state: SimState = SimState()
+        self.state: SimState = SimState(self.modelname)
         self.select: Selector = Selector()
         self.settings: Settings = DEFAULT_SETTINGS
 
@@ -189,7 +191,7 @@ class Simulation:
     def _initialize_simulation(self):
         """Initializes the Simulation data and GMSH API with proper shutdown routines.
         """
-        self.state.init(self.modelname)
+        self.state.init()
         
         # If GMSH is not yet initialized (Two simulation in a file)
         if gmsh.isInitialized() == 0:
@@ -297,7 +299,7 @@ class Simulation:
         Returns:
             bool: If the code is not the same
         """
-        self.save_file = True
+        
         self._cache_run = True
         filestr = get_run_section()
         self._file_lines = filestr
@@ -305,6 +307,7 @@ class Simulation:
         
         # If there is not pylines file, simulate (can't have been run).
         if not cachepath.exists():
+            self.save_file = True
             logger.info('No cached data detected, running simulation!')
             return True
         
@@ -480,6 +483,7 @@ class Simulation:
              volume_mesh: bool = True,
              opacity: float | None = None,
              labels: bool = False,
+             bc: bool = False,
              face_labels: bool = False) -> None:
         """View the current geometry in either the BaseDisplay object (PVDisplay only) or
         the GMSH viewer.
@@ -491,11 +495,13 @@ class Simulation:
             volume_mesh (bool, optional): If the internal mesh should be plot instead of only the surface boundary mesh. Defaults to True
             opacity (float | None, optional): The object/mesh opacity. Defaults to None.
             labels: (bool, optional): If geometry name labels should be shown. Defaults to False.
+            bc: (bool, optional): If you wish to show boundary condition selections in the view
         """
         if not (self.display is not None and self.mesh.defined) or use_gmsh:
             gmsh.model.occ.synchronize()
             gmsh.fltk.run()
             return
+        
         for geo in self.state.current_geo_state:
             self.display.add_object(geo, mesh=plot_mesh, opacity=opacity, volume_mesh=volume_mesh, label=labels)
             
@@ -504,7 +510,11 @@ class Simulation:
                     self.display.add_object(geo.face(face_name), color='yellow', opacity=0.1, label=face_name)
         if selections:
             [self.display.add_object(sel, color='red', opacity=0.6, label=sel.name) for sel in selections]
-        
+        if bc:
+            for bc in self.mw.bc.boundary_conditions:
+                if bc.selection.invalid:
+                    continue
+                self.display.add_object(bc.selection, color=bc._color, opacity=0.4, label=True, label_text=bc._name, texture=bc._texture)
         self.display.show()
 
         return None
@@ -651,7 +661,7 @@ class Simulation:
             if clear_mesh and i_iter > 0:
                 logger.info('Cleaning up mesh.')
                 gmsh.clear()
-                self.state.reset_geostate(self.modelname)
+                self.state.reset_geostate()
                 self.mw.reset()
                 
             

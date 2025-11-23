@@ -19,7 +19,7 @@ from ...mesher import Mesher
 from ...material import Material
 from ...mesh3d import Mesh3D
 from ...coord import Line
-from ...geometry import GeoSurface
+from ...geometry import GeoSurface, GeoVolume
 from ...elements.femdata import FEMBasis
 from ...elements.nedelec2 import Nedelec2
 from ...solver import DEFAULT_ROUTINE, SolveRoutine
@@ -512,7 +512,7 @@ class Microwave3D:
         if freq is None:
             freq = self.frequencies[0]
         
-        materials = self.mesh._get_material_assignment(self.mesher.volumes)
+        materials = self._get_material_assignment(self.mesher.volumes)
 
         ertet = np.zeros((3,3,self.mesh.n_tets), dtype=np.complex128)
         tandtet = np.zeros((3,3,self.mesh.n_tets), dtype=np.complex128)
@@ -702,7 +702,7 @@ class Microwave3D:
         if self.basis is None:
             raise SimulationError('Cannot proceed, the simulation basis class is undefined.')
 
-        materials = self.mesh._get_material_assignment(self.mesher.volumes)
+        materials = self._get_material_assignment(self.mesher.volumes)
 
         ### Does this move
         logger.debug('Initializing frequency domain sweep.')
@@ -873,6 +873,42 @@ class Microwave3D:
         self._post_process(results, matset)
         return self.data
     
+    def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
+        '''Retrieve the material properties of the geometry'''
+        #arry = np.zeros((3,3,self.n_tets,), dtype=np.complex128)
+        for vol in volumes:
+            vol.material.reset()
+        
+        materials = []
+        i = 0
+        for vol in volumes:
+            if vol.material not in materials:
+                materials.append(vol.material)
+                vol.material._hash_key = i
+                i += 1
+            
+        xs = self.mesh.centers[0,:]
+        ys = self.mesh.centers[1,:]
+        zs = self.mesh.centers[2,:]
+        
+        matassign = -1*np.ones((self.mesh.n_tets,), dtype=np.int64)
+        
+        for volume in sorted(volumes, key=lambda x: x._priority):
+        
+            for dimtag in volume.dimtags:
+                
+                tet_ids = self.mesh.get_tetrahedra(dimtag[1])
+            
+                #tet_ids = np.array([self.mesh.tet_t2i[t] for t in etags])
+                matassign[tet_ids] = volume.material._hash_key
+        
+        for mat in materials:
+            ids = np.argwhere(matassign==mat._hash_key).flatten()
+            mat.initialize(xs[ids], ys[ids], zs[ids], ids)
+                    
+        
+        return materials
+    
     def _run_adaptive_mesh(self,
                 iteration: int, 
                 frequency: float,
@@ -910,7 +946,7 @@ class Microwave3D:
         if self.basis is None:
             raise SimulationError('Cannot proceed, the simulation basis class is undefined.')
 
-        materials = self.mesh._get_material_assignment(self.mesher.volumes)
+        materials = self._get_material_assignment(self.mesher.volumes)
 
         ### Does this move
         logger.debug('Initializing single frequency settings.')
@@ -998,7 +1034,7 @@ class Microwave3D:
         if self.basis is None:
             raise SimulationError('Cannot proceed. The simulation basis class is undefined.')
 
-        materials = self.mesh._get_material_assignment(self.mesher.volumes)
+        materials = self._get_material_assignment(self.mesher.volumes)
         
         ### Does this move
         logger.debug('Initializing frequency domain sweep.')

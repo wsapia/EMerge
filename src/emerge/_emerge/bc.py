@@ -43,7 +43,9 @@ def _unique(input: list[int]) -> list:
 class BoundaryCondition:
     """A generalized class for all boundary condition objects.
     """
-    
+    _color: str = "#a54141"
+    _name: str = "UnnamedBC"
+    _texture: str = "None"
     def __init__(self, assignment: GeoObject | Selection):
 
         self.dimension: BCDimension = BCDimension.ANY
@@ -111,6 +113,7 @@ class BoundaryCondition:
         """
         excluded_edges = [x for x in self.tags if x in tags]
         self.tags = [x for x in self.tags if x not in tags]
+        self.selection.remove_tags(tags)
         return excluded_edges
     
     def exclude_bc(self, other: BoundaryCondition) -> list[int]:
@@ -216,6 +219,8 @@ class BoundaryConditionSet:
 
 class Periodic(BoundaryCondition):
 
+    _color: str = "#5d4fda"
+    _name: str = "PeriodicBC"
     def __init__(self, 
                  selection1: Selection,
                  selection2: Selection,

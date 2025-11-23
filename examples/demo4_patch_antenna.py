@@ -10,7 +10,9 @@ In this demo we build and simulate a rectangular patch antenna on a dielectric
 substrate with airbox and lumped port excitation, then visualize S-parameters
 and far-field radiation patterns. 
 
-This simulation is quite heavy and might take a while to fully compute.
+This simulation is quite heavy and might take a while to fully compute with SuperLU on ARM Mac's (UMFPACK Advised)
+
+Due to the relatively coarse mesh, the resonance frequency is lower than in reality (expected around 1.59GHz)
 """
 
 # --- Unit and simulation parameters --------------------------------------
@@ -113,7 +115,7 @@ pec_selection = em.select(rpatch,ground)
 # Assigning the boundary conditions
 abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
 # --- Run frequency-domain solver ----------------------------------------
-model.view(plot_mesh=True, volume_mesh=False)
+model.view(plot_mesh=True, volume_mesh=False, bc=True)
 
 data = model.mw.run_sweep()
 
