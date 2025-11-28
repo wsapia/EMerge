@@ -24,7 +24,7 @@ import numpy as np
 mm = 0.001
 
 # Then we create our simulation object
-model = em.Simulation('ParallelPlates', write_log=True)
+model = em.Simulation('ParallelPlates')
 
 # Parallel plate transmision lines are infinitely big. To model a finite volume we have to use the appropriate boundary conditions
 # We will simulate a wave at 10GHz so we dimension it appropriately as a box of 20mm wide, 20mm deep and 50mm long.

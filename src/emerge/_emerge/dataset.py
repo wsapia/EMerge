@@ -19,7 +19,7 @@ import numpy as np
 from typing import TypeVar, Generic, Any
 from loguru import logger
 from .physics.microwave.microwave_data import MWData
-from .simulation_data import DataContainer, DataEntry
+from .simulation_data import DataContainer
 
 class SimulationDataset:
     """This simple class contains the different kinds of data sets in the Simulation Model. It includes

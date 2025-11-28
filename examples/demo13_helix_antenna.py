@@ -42,10 +42,10 @@ h_curve = em.geo.Curve.helix_lh((0,0,porth+dfeed/2), (0,0,porth+dfeed/2+L), rad0
 cross_section = em.geo.XYPolygon.circle(radw, Nsections=6)
 
 # Sweep a circular cross-section along the curve to make a metallic pipe
-helix = h_curve.pipe(cross_section).set_material(em.lib.MET_COPPER)
+helix = h_curve.pipe(cross_section).set_material(em.lib.MET_COPPER).foreground()
 
 # We add a block to make attachment of ports easier.
-block = em.geo.Box(dfeed, dfeed, dfeed, position=h_curve.p0, alignment=em.CENTER).set_material(em.lib.MET_COPPER)
+block = em.geo.Box(dfeed, dfeed, dfeed, position=h_curve.p0, alignment=em.CENTER).set_material(em.lib.MET_COPPER).foreground()
 
 # Optional preview of current scene (geometry only at this point)
 model.view()

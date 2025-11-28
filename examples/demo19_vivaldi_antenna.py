@@ -28,8 +28,8 @@ Lstub = 7           # Length of the radial stub
 stub_ang = 80       # Radial stub angle
 stub_ang_off = 20   # Radial stub angle offset
 slot_margin = 5*mm  # Margin around the taper for the slots
-wslot = 2*mm        # The width of the slot
-wgap = 2*mm         # The distance betwen slots
+wslot = 4*mm        # The width of the slot
+wgap = 4*mm         # The distance betwen slots
 
 Wperiod = wslot+wgap
 
@@ -92,7 +92,7 @@ exp_taper_dialated = em.geo.XYPolygon()\
 
 # Next we generate 15 slots. We make them stretch across the entire PCB.
 slots = []
-for n in range(15):
+for n in range(7):
     rect = em.geo.XYPlate(wslot, 60*mm, (70*mm - (n+1)*Wperiod, -30*mm, -th*mm))
     slots.append(rect)
     
@@ -141,11 +141,8 @@ ground = em.geo.subtract(ground, slots)
 m.commit_geometry()
 
 # We set our frequency range from 3GHz to 10GHz in 31 setps.
-m.mw.set_frequency_range(3e9, 10e9, 51)
-
-m.generate_mesh()
-
-m.view(plot_mesh=True)
+m.mw.set_frequency_range(3e9, 8e9, 31)
+m.mw.set_resolution(0.33)
 
 # Here we set our boundary conditions. The Absorbing boundary surfaace is the outside of the airbox.
 abc = airbox.outside()
@@ -155,9 +152,11 @@ abc = airbox.outside()
 m.mw.bc.LumpedPort(port, 1, Z0=50)
 m.mw.bc.AbsorbingBoundary(abc)
 
+m.generate_mesh()
 m.view(plot_mesh=True, volume_mesh=False)
+
 # Before we run we call our adaptive mesh refinement at 7GHz. You can change the frequency yourself.
-m.adaptive_mesh_refinement(frequency=7e9)
+m.adaptive_mesh_refinement(frequency=6e9)
 m.view(plot_mesh=True, volume_mesh=False) # and view the resultant mesh
 
 # Finally we start our sweep

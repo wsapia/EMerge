@@ -259,13 +259,13 @@ def select_refinement_indices(errors: np.ndarray, refine: float) -> np.ndarray:
     return np.array(indices)#chosen.astype(int)
 
 @njit(f8[:](i8, f8[:,:], f8, f8, f8[:]), cache=True, nogil=True, parallel=False)
-def compute_size(id: int, coords: np.ndarray, q: float, scaler: float, dss: np.ndarray) -> float:
+def compute_size(index: int, coords: np.ndarray, gr: float, scaler: float, dss: np.ndarray) -> float:
     """Optimized function to compute the size impressed by size constraint points on each other size constraint point.
 
     Args:
         id (int): _description_
         coords (np.ndarray): _description_
-        q (float): _description_
+        gr (float): growth rate
         scaler (float): _description_
         dss (np.ndarray): _description_
 
@@ -274,12 +274,13 @@ def compute_size(id: int, coords: np.ndarray, q: float, scaler: float, dss: np.n
     """
     N = dss.shape[0]
     sizes = np.zeros((N,), dtype=np.float64)-1.0
-    x, y, z = coords[:,id]
+    x, y, z = coords[:,index]
     for n in prange(N):
-        if n == id:
+        if n == index:
             sizes[n] = dss[n]*scaler
             continue
-        nsize = scaler*dss[n]/q - (1-q)/q * max(0, (((x-coords[0,n])**2 + (y-coords[1,n])**2 + (z-coords[2,n])**2)**0.5-dss[n]/3))
+        distance = ((x-coords[0,n])**2 + (y-coords[1,n])**2 + (z-coords[2,n])**2)**0.5 
+        nsize = scaler*dss[n]/gr - (1-gr)/gr * max(0, (distance - dss[n]*0))
         sizes[n] = nsize
     return sizes
 
@@ -312,31 +313,28 @@ def can_remove(index: int, M: np.ndarray, scaling: float, include: np.ndarray) -
     return 0
 
 @njit(i8[:](f8[:,:], f8, f8[:], f8, f8), cache=True, nogil=True, parallel=False)
-def reduce_point_set(coords: np.ndarray, q: float, dss: np.ndarray, scaler: float, keep_percentage: float) -> list[int]:
+def reduce_point_set(coords: np.ndarray, gr: float, dss: np.ndarray, scaler: float, keep_percentage: float) -> list[int]:
     N = dss.shape[0]
     impressed_size = np.zeros((N,N), np.float64)
     
     include = np.ones((N,), dtype=np.int64)
     
     for n in range(N):
-        impressed_size[:,n] = compute_size(n, coords, q, scaler, dss)
+        impressed_size[n,:] = compute_size(n, coords, gr, scaler, dss)
+    
     
     current_min = nbmin(impressed_size, 1, include)
-    
     counter = 0
+    
     for i in range(N):
-        
-        if include[i]==0:
-            continue
 
         if (N-counter)/N < keep_percentage:
             break
         
-        n_imposed = np.sum(impressed_size[:,i] <= (current_min*1.3))
-        
-        if n_imposed == 0:
+        if current_min[i] <= impressed_size[i,i]*0.8:
             include[i] = 0
             counter = counter + 1
+            current_min = nbmin(impressed_size, 1, include)
         
         
     

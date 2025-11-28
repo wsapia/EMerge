@@ -552,7 +552,7 @@ class Simulation:
         
         logger.trace(f'Parsed geometries = {self.state.geos}')
         
-        self.mesher.submit_objects(self.state.geos)
+        self.mesher.submit_objects(self.state.current_geo_state)
         
         self._defined_geometries = True
         self.display._facetags = [dt[1] for dt in gmsh.model.get_entities(2)]
@@ -595,8 +595,9 @@ class Simulation:
         gmsh.model.occ.synchronize()
 
         # Set the mesh size
+        self.mesher._configure_bc_size(self.mw.bc.boundary_conditions)
         self.mesher._configure_mesh_size(self.mw.get_discretizer(), self.mw.resolution) # This makes no sense to do this here
-            
+        
         # Validity check
         x1, y1, z1, x2, y2, z2 = gmsh.model.getBoundingBox(-1, -1)
         bb_volume = (x2-x1)*(y2-y1)*(z2-z1)
@@ -624,6 +625,7 @@ class Simulation:
         self.mesh._pre_update(self.mesher._get_periodic_bcs())
         self.mesh.exterior_face_tags = self.mesher.domain_boundary_face_tags
         gmsh.model.occ.synchronize()
+        self.state.store_geometry_data()
         logger.trace(' (3) Mesh routine complete')
         
     def parameter_sweep(self, clear_mesh: bool = True, **parameters: np.ndarray) -> Generator[tuple[float,...], None, None]:
@@ -729,7 +731,15 @@ class SimulationBeta(Simulation):
         #self.mesher.set_algorithm(Algorithm3D.HXT)
         #logger.debug('Setting mesh algorithm to HXT')
         
-        
+    
+    def __enter__(self) -> SimulationBeta:
+        """This method is depricated with the new atexit system. It still exists for backwards compatibility.
+
+        Returns:
+            SimulationBeta: the SimulationBeta object
+        """
+        return self
+    
     def _reset_mesh(self):
         gmsh.model.mesh.clear()
         self.mw.reset(_reset_bc = False)
@@ -748,14 +758,14 @@ class SimulationBeta(Simulation):
         
         ratio = (a0 + np.arctan(b0*P)*q0)
         if last_ratio > 1.0:
-            ratio = ratio/0.7
+            ratio = ratio/0.9
         if last_ratio < 1.0:
-            ratio = ratio*0.7
+            ratio = ratio*0.9
         
         return ratio
     
     @staticmethod
-    def compute_ratio(npp: float, Rs: np.ndarray, Ps: np.ndarray, P_target: float) -> float:
+    def compute_ratio(new_point_percentage: float, ratios: np.ndarray, percentages: np.ndarray, P_target: float) -> float:
         """
         Strategy:
         - n=0: use guess_R(P_target, throttle=1.0)
@@ -766,34 +776,28 @@ class SimulationBeta(Simulation):
         Returns R_guess in (0, 1].
         """
         #print(Rs, Ps)
-        Rs = (np.asarray(Rs, dtype=float))
-        Ps = (np.asarray(Ps, dtype=float))
+        ratios = (np.asarray(ratios, dtype=float))
+        percentages = (np.asarray(percentages, dtype=float))
 
         # Clean
-        m = np.isfinite(Rs) & np.isfinite(Ps) & (Rs > 0.0)
-        Rs = Rs[m]
-        Ps = Ps[m]
-        n = Rs.size
-
-        # n = 0
-        if n == 0:
-            R_guess = SimulationBeta.guess_R(npp, 1.0)
-            return float(np.clip(R_guess, 1e-6, 1.0))
-
-        # n = 1
+        n = ratios.size
+        
         if n == 1:
-            last_R = float(Rs[-1])
-            last_P = float(Ps[-1])
-
+            last_R = float(ratios[-1])
+            last_P = float(percentages[-1])
+            
             if P_target <= last_P <= 2.0 * P_target:
                 # Already acceptable
-                return float(np.clip(last_R, 1e-6, 1.0))
-            R_guess = SimulationBeta.guess_R(npp, last_P/P_target)
-            return float(np.clip(R_guess, 1e-6, 1.0))
+                return last_R * ((1.5*P_target)/last_P)**0.2
+            
+            if last_P > P_target*2.0:
+                return last_R / 0.8
+            else:
+                return last_R * 0.8
 
         P_target = P_target*1.5
-        x = 1.0 / Rs
-        y = Ps
+        x = 1.0 / ratios
+        y = percentages
         dy = y - P_target
 
         # Indices by side of target
@@ -804,7 +808,7 @@ class SimulationBeta(Simulation):
         # Exact hit
         if idx_eq.size > 0:
             # Return corresponding R (already perfect)
-            R_exact = float(Rs[idx_eq[0]])
+            R_exact = float(ratios[idx_eq[0]])
             return float(np.clip(R_exact, 1e-6, 1.0))
 
         def pick_two(indices, reverse=False):
@@ -863,9 +867,9 @@ class SimulationBeta(Simulation):
                                  phase_convergence: float = 180,
                                  max_tets: int = 1e6,
                                  refinement_ratio: float = 0.6,
-                                 growth_rate: float = 2,
+                                 growth_rate: float = 1.6,
                                  minimum_refinement_percentage: float = 20.0, 
-                                 error_field_inclusion_percentage: float = 60.0,
+                                 error_field_inclusion_percentage: float = 55.0,
                                  minimum_steps: int = 1,
                                  frequency: float | list[float] = None,
                                  show_mesh: bool = False) -> SimulationDataset:
@@ -916,6 +920,7 @@ class SimulationBeta(Simulation):
         
         NF = len(sim_freqs)
         
+        original_ratio = refinement_ratio
         for step in range(1,max_steps+1):
             
             self.data.sim.new(iter_step=step)
@@ -965,7 +970,8 @@ class SimulationBeta(Simulation):
                 error, lengths = fields[i]._solution_quality(solve_ids)
                 errors[:,i] = error
             
-            error = np.mean(errors, axis=1)
+            
+            error = np.max(errors, axis=1)
                 
             idx = select_refinement_indices(error, error_field_inclusion_percentage/100)
             idx = idx[::-1]
@@ -973,48 +979,44 @@ class SimulationBeta(Simulation):
             npts = idx.shape[0]
             np_percentage = npts/self.mesh.n_tets * 100
             
+            original_ratio = 0.75*original_ratio + 0.25*refinement_ratio
+            refinement_ratio = original_ratio
             Ratios = []
             Percentages = []
             
-            refinement_ratio = self.compute_ratio(np_percentage, Ratios, Percentages, minimum_refinement_percentage)
-            
-            logger.info(f'Adding {npts} refinement points with a ratio: {refinement_ratio}')
             
             included = np.zeros((self.mesh.n_tets, ), dtype=np.bool)
             included[idx] = True
             
             coords, sizes = tet_to_node(self.mesh.nodes, self.mesh.tets, lengths, included)
             self.mesher.add_refinement_points(coords, sizes, refinement_ratio*np.ones_like(sizes))#self.mw.mesh.centers[:,idx], lengths[idx], refinement_ratio*np.ones_like(lengths[idx]))
-            
-            logger.debug(f'Pass {step}: Adding {len(sizes)} new refinement points.')
                 
             new_ids = reduce_point_set(self.mesher._amr_coords, growth_rate, self.mesher._amr_sizes, refinement_ratio, 0.20)
             
             nremoved = self.mesher._amr_coords.shape[1] - len(new_ids)
-            if nremoved > 0:
-                logger.info(f'Cleanup of step {step}: Removing {nremoved} points.')
+            
+            logger.info(f'    Pass {step}: Added {len(sizes) - nremoved} new refinement points with ratio {refinement_ratio}.')
             
             self.mesher._amr_coords = self.mesher._amr_coords[:,new_ids]
             self.mesher._amr_sizes = self.mesher._amr_sizes[new_ids]
             self.mesher._amr_ratios = self.mesher._amr_ratios[new_ids]
             self.mesher._amr_new = self.mesher._amr_new[new_ids]
             
-            logger.debug(f'Initial refinement ratio: {refinement_ratio}')
+            logger.debug(f'    Initial refinement ratio: {refinement_ratio}')
             
             # Mesh refinement loop. Only escapes if the mesh refined a certain set percentage.
             counter = 0
             while True:
                 counter += 1
                 if counter == 10:
-                    logger.warning('More than 10 attempts at reaching the target refinement. Continuing with current.')
+                    logger.warning('    More than 10 attempts at reaching the target refinement. Continuing with current.')
                     break
                 counter += 1
                 self._reset_mesh()
-                logger.debug(f'Pass {step}')
                 self.mesher.set_refinement_function(growth_rate, 2.0)
                 self.generate_mesh(True)
                 percentage = (self.mesh.n_tets/last_n_tets - 1) * 100
-                logger.info(f'Pass {step}: New mesh has {self.mesh.n_tets} (+{percentage:.1f}%) tetrahedra.')  
+                logger.info(f'    Pass {step}: New mesh has {self.mesh.n_tets} (+{percentage:.1f}%) tetrahedra.')  
                 
                 Ratios.append(refinement_ratio)
                 Percentages.append(percentage)
@@ -1022,7 +1024,7 @@ class SimulationBeta(Simulation):
                 if percentage < minimum_refinement_percentage or percentage > (minimum_refinement_percentage*2):
                     
                     refinement_ratio = self.compute_ratio(np_percentage, Ratios, Percentages, minimum_refinement_percentage)
-                    logger.info(f'Refinement target not reached! New ratio = {refinement_ratio:.3f}')
+                    logger.info(f'    Refinement target not reached! New ratio = {refinement_ratio:.3f}')
                     self.mesher.set_ratio(refinement_ratio)
                     if refinement_ratio >= 1.0:
                         logger.warning(f'Refinement ratio pushed above 1.0... continuing with current percentage.')
@@ -1045,6 +1047,8 @@ class SimulationBeta(Simulation):
         if show_mesh:
                 self.view(plot_mesh=True, volume_mesh=True)
         old = self.state.reload()
+        self.state.store_geometry_data()
+        
         return old
     
     

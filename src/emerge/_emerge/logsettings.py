@@ -155,5 +155,10 @@ class DebugCollector:
             yield i+1, message
 
 
+############################################################
+#                        SINGLETONS                       #
+############################################################
+
+
 LOG_CONTROLLER = LogController()
 DEBUG_COLLECTOR = DebugCollector()

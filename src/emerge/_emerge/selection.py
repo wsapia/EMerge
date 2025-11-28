@@ -76,6 +76,9 @@ class _CalculationInterface:
         
         return self._ifobj.getCharPoint(facetag)
 
+    def getArea(self, tag: int) -> float:
+        return self._ifobj.getArea(tag)
+    
 _CALC_INTERFACE = _CalculationInterface()
 
 
@@ -424,7 +427,17 @@ class FaceSelection(Selection):
     def normal(self) -> np.ndarray:
         ''' Returns a 3x3 coordinate matrix of the XY + out of plane basis matrix defining the face assuming it can be projected on a flat plane.'''
         ns = [_CALC_INTERFACE.getNormal(tag) for tag in self.tags]
+       
         return ns[0]
+    
+    @property
+    def area(self) -> float:
+        """Returns the area of the selected surface
+
+        Returns:
+            float: _description_
+        """
+        return sum([_CALC_INTERFACE.getArea(tag) for tag in self.tags])
     
     def rect_basis(self) -> tuple[CoordinateSystem, tuple[float, float]]:
         ''' Returns a dictionary with keys: origin, axes, corners. The axes are the 3D basis vectors of the rectangle. The corners are the 4 corners of the rectangle.

@@ -100,7 +100,6 @@ m.mw.set_resolution(0.33)
 m.generate_mesh()
 
 # Notice the course initial mesh
-m.view(plot_mesh=False)
 m.view(plot_mesh=True)
 
 ############################################################
@@ -122,7 +121,8 @@ p2 = m.mw.bc.ModalPort(mp2, 2, modetype='TE')
 p2.align_modes(em.YAX)
 
 # we also add an absorbing boundary at the top and bottom face to minimize resonance modes
-m.mw.bc.AbsorbingBoundary(em.select(air_top.tpyop, air_bottom.bottom))
+m.mw.bc.AbsorbingBoundary(em.select(air_top.top, air_bottom.bottom))
+
 ############################################################
 #                        SIMULATION                       #
 ############################################################
@@ -131,7 +131,7 @@ m.mw.bc.AbsorbingBoundary(em.select(air_top.tpyop, air_bottom.bottom))
 # We set show_mesh to True so we can see the progress of refinement for the purspose of this example.
 # This halts the simulation so we have to click away the window to proceed.
 # You can see that more nodes are added around the signal traces because the E-field error is highest
-m.adaptive_mesh_refinement(frequency=5.5e9, show_mesh=True)
+m.adaptive_mesh_refinement(max_steps=8, frequency=5.5e9)
 
 # We can view the improvement in the refined mesh.
 m.view(plot_mesh=True, volume_mesh=False)

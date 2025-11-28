@@ -273,6 +273,15 @@ class HexCell(PeriodicCell):
         self.f22 = (-o2, n2)
         self.f32 = (-o3, n3)
 
+    @property
+    def area(self) -> float:
+        """Area of the centrally symmetric hexagon defined by p1, p2, p3."""
+        p1, p2, p3 = self.p1, self.p2, self.p3
+        return float(abs(
+            np.cross(p1, p2) +
+            np.cross(p2, p3) -
+            np.cross(p3, p1)
+        ))
     def port_face(self, z: float):
         xs, ys, zs = zip(self.p1, self.p2, self.p3)
         poly = XYPolygon(xs, ys).geo(GCS.displace(0,0,zs[0]))

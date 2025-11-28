@@ -17,7 +17,7 @@ model = em.Simulation('StriplineWithVias')
 model.check_version("1.2.2") # Checks version compatibility.
 
 # As usual we start by creating our layouter
-ly = em.geo.PCB(th, mm, em.GCS, material=em.lib.DIEL_RO4350B, trace_material=em.lib.PEC)
+ly = em.geo.PCB(th, mm, em.GCS, layers=3, material=em.lib.DIEL_RO4350B, trace_material=em.lib.PEC)
 
 # Here we define a simple stripline path that makes a knick turn and a via jump to a new layer.
 # None of the transmission lines are conciously matched in any way, this is just about the routing
@@ -25,9 +25,11 @@ ly = em.geo.PCB(th, mm, em.GCS, material=em.lib.DIEL_RO4350B, trace_material=em.
 # The .via(...) method allows one to add a via geometry to the PCBLayouter that can be extracted later
 # A user may decide whether to proceed or not beyond the via. More information can be found in the 
 # docstring of the method. The vias can be created later.
-ly.new(0,0,1,(1,0), -th/2).store('p1').straight(10).turn(90).straight(10).turn(-90)\
-    .straight(2).via(0, 0.2, True).straight(8).via(-th/2, 0.2).straight(2)\
-        .turn(-90).straight(10).turn(90).straight(10).store('p2')
+w0 = ly.calc.z0(50, 1, 0)*0.9
+w1 = ly.calc.z0(50,2,0)
+ly.new(0,0,w0,(1,0), -th/2)['p1'].straight(10).turn(90).straight(10).turn(-90)\
+    .straight(5).via(0, 0.2, True, width=w1).straight(8).via(-th/2, 0.2, width=w0).straight(5)\
+        .turn(-90).straight(10).turn(90).straight(10)['p2']
 
 # As usual we compile the traces as a merger of polygons
 trace = ly.compile_paths(True)
@@ -39,8 +41,8 @@ vias = ly.generate_vias(True)
 # Here I use lumped ports instead of wave ports. I use the references made earlier to generate the port.
 # By default, all lumped port sheets will be shorted to z=-thickness. You can change this as an optional
 # argument.
-lp1 = ly.lumped_port(ly.load('p1'))
-lp2 = ly.lumped_port(ly.load('p2'))
+lp1 = ly.lumped_port(ly['p1'])
+lp2 = ly.lumped_port(ly['p2'])
 
 # Because lumped ports don't stop at the edge of our domain, we make sure to add some margins everywhere.
 ly.determine_bounds(5,5,5,5)
@@ -57,7 +59,7 @@ model.commit_geometry()
 
 model.view()
 
-model.mw.set_frequency_range(1e9, 6e9, 11)
+model.mw.set_frequency_range(1e9, 6e9, 21)
 model.mesher.set_boundary_size(trace, 1*mm)
 
 model.generate_mesh()
@@ -77,9 +79,9 @@ p2 = model.mw.bc.LumpedPort(lp2, 2)
 # Finally we run the simulation!
 data = model.mw.run_sweep(True, n_workers=4, frequency_groups=8)
 
-freq = data.scalar.grid.freq
-S11 = data.scalar.grid.S(1,1)
-S21 = data.scalar.grid.S(2,1)
+freq = data.scalar.grid.dense_f(1001)
+S11 = data.scalar.grid.model_S(1,1,freq)
+S21 = data.scalar.grid.model_S(2,1,freq)
 
 plot_sp(freq, [S11, S21], labels=['S11','S21'])
 
@@ -91,5 +93,5 @@ model.display.add_portmode(p1, data.field[3].k0)
 # This is equivalent to the interpolate method except it automatically generates
 # the point cloud based on a plane x,y or z coordinate.
 model.display.add_quiver(*data.field[3].cutplane(ds=0.001, z=-0.00025).vector('E'))
-model.display.add_surf(*data.field[3].cutplane(ds=0.001, z=-0.00075).scalar('Ez','real'), symmetrize=True)
+model.display.animate().add_surf(*data.field[3].cutplane(ds=0.001, z=-0.00075).scalar('Ez','complex'), symmetrize=True)
 model.display.show()

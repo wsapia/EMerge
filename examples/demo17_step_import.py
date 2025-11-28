@@ -24,7 +24,6 @@ sim.mw.set_frequency_range(8e9, 10e9, 21)
 
 # Define custom dielectric material for the rod. We choose something similar to 3D printing resin.
 RESIN = em.Material(er=2.5, color="#777777", opacity=1.0)
-
 # Load STEP file.
 # STEPItems groups imported solids. Depending on the configuration of the STEP files, sometimes you have to provide unit=0.001 if the model
 # is made in millimeters for example. This does not always go automatically yet.

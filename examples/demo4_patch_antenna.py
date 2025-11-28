@@ -34,7 +34,7 @@ f1 = 1.55e9             # start frequency
 f2 = 1.60e9             # stop frequency
 
 # --- Create simulation object -------------------------------------------
-model = em.SimulationBeta('PatchAntenna')
+model = em.Simulation('PatchAntenna')
 
 model.check_version("1.2.2") # Checks version compatibility.
 
@@ -77,7 +77,7 @@ rpatch.set_material(em.lib.PEC)
 
 # --- Assign materials and simulation settings ---------------------------
 # Dielectric material with some transparency for display
-dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
+dielectric.set_material(em.Material(3.38, color="#207020", opacity=0.9))
 
 # Mesh resolution: fraction of wavelength
 model.mw.set_resolution(0.2)
@@ -90,9 +90,9 @@ model.commit_geometry()
 
 # --- Mesh refinement settings --------------------------------------------
 # Finer boundary mesh on patch edges for accuracy
-model.mesher.set_boundary_size(rpatch, 5 * mm)
+model.mesher.set_boundary_size(rpatch, 2 * mm)
 # Refined mesh on port face for excitation accuracy
-model.mesher.set_face_size(port, 2 * mm)
+model.mesher.set_face_size(port, 1 * mm)
 
 # --- Generate mesh and preview ------------------------------------------
 model.generate_mesh()                             # build the finite-element mesh
@@ -117,7 +117,6 @@ abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
 # --- Run frequency-domain solver ----------------------------------------
 model.view(plot_mesh=True, volume_mesh=False)
 
-model.adaptive_mesh_refinement(frequency=[1.5e9, 1.55e9, 1.6e9], show_mesh=True)
 data = model.mw.run_sweep()
 
 # --- Post-process S-parameters ------------------------------------------

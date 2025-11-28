@@ -213,7 +213,10 @@ class SimState:
         Returns:
             np.ndarray: _description_
         """
-        return self.mesh.ftag_to_normal[facetag]
+        if self.mesh.defined:
+            return self.mesh.ftag_to_normal[facetag]
+        else:
+            return np.array(gmsh.model.getNormal(facetag, (0,0)))
     
     def getCharPoint(self, facetag: int) -> np.ndarray:
         """Returns a coordinate that is always on the surface and roughly in the center
@@ -225,3 +228,11 @@ class SimState:
             np.ndarray: _description_
         """
         return self.mesh.ftag_to_point[facetag]
+    
+    def getArea(self, tag: int) -> float:
+        if self.mesh.defined is True:
+            area = sum([self.mesh.areas[tri] for tri in self.mesh.ftag_to_tri[tag]])
+            return area
+        else:
+            area = gmsh.model.occ.getMass(2,tag)
+            return area

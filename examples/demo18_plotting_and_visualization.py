@@ -14,8 +14,6 @@ In front of the radiator we place a 5mm radius copper ball, just for visualizati
 It is not supposed to do anything special nor be well matched. Its only about demonstrating plot features.
 
 """
-
-
 # First define some constants
 
 mm = 0.001

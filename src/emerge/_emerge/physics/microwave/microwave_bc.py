@@ -91,9 +91,10 @@ class MWBoundaryConditionSet(BoundaryConditionSet):
             port = self.FloquetPort(poly, port_number)
             port.width = self._cell.width
             port.height = self._cell.height
+            port.area = port.width*port.height
         elif isinstance(self._cell, HexCell):
             port = self.FloquetPort(poly, port_number)
-            port.area = 1.0
+            port.area = self._cell.area
         self._cell._ports.append(port)
         return port
 
@@ -377,6 +378,7 @@ class FloquetPort(PortBC):
     _color: str = "#e1bd1c"
     _texture: str = "tex5.png"
     _name: str = "FloquetPort"
+    
     def __init__(self,
                  face: FaceSelection | GeoSurface,
                  port_number: int,
@@ -407,7 +409,8 @@ class FloquetPort(PortBC):
         return Z0
 
     def get_amplitude(self, k0: float) -> float:
-        return 1.0
+        amplitude = np.sqrt(2*Z0*self.power/(self.area*np.cos(self.scan_theta)))
+        return amplitude
     
     def get_beta(self, k0: float) -> float:
         ''' Return the out of plane propagation constant. βz.'''
@@ -442,7 +445,7 @@ class FloquetPort(PortBC):
         P = self.pol_p
         S = self.pol_s
 
-        E0 = self.get_amplitude(k0)*np.sqrt(2*Z0/(self.area))
+        E0 = self.get_amplitude(k0)
         Ex = E0*(-S*np.sin(self.scan_phi) - P*np.cos(self.scan_theta)*np.cos(self.scan_phi))*phi
         Ey = E0*(S*np.cos(self.scan_phi) - P*np.cos(self.scan_theta)*np.sin(self.scan_phi))*phi
         Ez = E0*(-P*E0*np.sin(self.scan_theta))*phi
@@ -471,6 +474,7 @@ class ModalPort(PortBC):
     _color: str = "#e1bd1c"
     _texture: str = "tex5.png"
     _name: str = "ModalPort"
+    
     def __init__(self,
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -515,7 +519,8 @@ class ModalPort(PortBC):
         
         self.plus_terminal: list[tuple[int, int]] = []
         self.minus_terminal: list[tuple[int, int]] = []
-
+        self.N_mesh_tris: int = 50
+        
         if cs is None:
             logger.info('Constructing coordinate system from normal port')
             self.cs = Axis(self.selection.normal).construct_cs() # type: ignore
@@ -526,6 +531,11 @@ class ModalPort(PortBC):
         
         self.vintline: list[Line] = []
 
+    @property
+    def _size_constraint(self) -> float:
+        area = self.selection.area
+        return np.sqrt(area/self.N_mesh_tris*4/np.sqrt(3))
+    
     def set_integration_line(self, c1: tuple[float, float, float], c2: tuple[float, float, float], N: int = 21) -> None:
         """Define the integration line start and end point
 
@@ -994,6 +1004,7 @@ class LumpedPort(PortBC):
     _color: str = "#e1851c"
     _name: str = "LumpedPort"
     _texture: str = "tex5.png"
+    
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
@@ -1050,7 +1061,11 @@ class LumpedPort(PortBC):
         if self.width > 0.5 or self.height > 0.5:
             DEBUG_COLLECTOR.add_report(f'{self}: A lumped port width/height larger than 0.5m has been detected: width={self.width:.3f}m. Height={self.height:.3f}.m. Perhaps you forgot a unit like mm, um, or mil')
 
-        
+    
+    @property
+    def _size_constraint(self) -> float:
+        return min(self.width, self.height) / 4
+    
     @property
     def surfZ(self) -> float:
         """The surface sheet impedance for the lumped port

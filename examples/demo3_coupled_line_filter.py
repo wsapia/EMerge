@@ -49,8 +49,7 @@ pcb = em.geo.PCB(th, unit=mil, material=mat)
 # --- Route coupled-line trace --------------------------------------------
 # start at (0,140) with width w0
 # label input port
-pcb.new(0, 140, w0, (1, 0)) \
-    .store('p1') \
+pcb.new(0, 140, w0, (1, 0))['p1'] \
     .straight(l0) \
     .turn(0) \
     .straight(l1 * 0.8) \
@@ -74,8 +73,7 @@ pcb.new(0, 140, w0, (1, 0)) \
     .straight(l1, w6) \
     .turn(0) \
     .straight(l1 * 0.8, w0, dy=abs(w1 - w0) / 2) \
-    .straight(l0, w0) \
-    .store('p2')                        # label output port
+    .straight(l0, w0)['p2']          # label output port
 
 # Compile the routed paths into a single GeoSurface
 stripline = pcb.compile_paths(merge=True)
@@ -88,11 +86,11 @@ diel = pcb.generate_pcb()                     # substrate dielectric block
 air = pcb.generate_air(4 * th)                # surrounding air box
 
 # --- Define ports for simulation ----------------------------------------
-p1 = pcb.modal_port(pcb.load('p1'), width_multiplier=5, height=4 * th)
-p2 = pcb.modal_port(pcb.load('p2'), width_multiplier=5, height=4 * th)
+p1 = pcb.modal_port(pcb['p1'], width_multiplier=5, height=4 * th)
+p2 = pcb.modal_port(pcb['p2'], width_multiplier=5, height=4 * th)
 
 # --- Solver settings -----------------------------------------------------
-model.mw.set_resolution(0.33)            # mesh density: fraction of wavelength
+model.mw.set_resolution(0.2)                    # mesh density: fraction of wavelength
 model.mw.set_frequency_range(5.2e9, 6.2e9, 31)  # 5.2–6.2 GHz, 31 points
 
 # --- Assemble geometry into simulation -----------------------------------

@@ -859,7 +859,8 @@ class Curve(GeoEdge):
     def pipe(self, crossection: GeoSurface | XYPolygon, 
              max_mesh_size: float | None = None,
              start_tangent: Axis | tuple[float, float, float] | np.ndarray | None = None,
-             x_axis: Axis | tuple[float, float, float] | np.ndarray | None = None) -> GeoVolume:
+             x_axis: Axis | tuple[float, float, float] | np.ndarray | None = None,
+             name: str = 'PipedVolume') -> GeoVolume:
         """Extrudes a surface or XYPolygon object along the given curve
 
         If a GeoSurface object is used, make sure it starts at the center of the curve. This property
@@ -894,7 +895,7 @@ class Curve(GeoEdge):
         pipetag = gmsh.model.occ.addPipe(surf.dimtags, self.tags[0], 'GuidePlan')
         self.remove()
         surf.remove()
-        volume = GeoVolume(pipetag[0][1])
+        volume = GeoVolume(pipetag[0][1], name=name)
         volume.max_meshsize = diag/2
         return volume
         

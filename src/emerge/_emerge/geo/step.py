@@ -165,11 +165,11 @@ class STEPItems:
             return self.points[0]
         return unite(*self.points)
     
-    def enclose(self, 
+    def enclose_params(self, 
                 margin: float = None,
                 x_margins: tuple[float, float] = (None, None),
                 y_margins: tuple[float, float] = (None, None),
-                z_margins: tuple[float, float] = (None, None)) -> Box:
+                z_margins: tuple[float, float] = (None, None)) -> tuple[float,float,float,tuple[float,float,float]]:
         """Create an enclosing bounding box for the step model.
 
         Args:
@@ -208,6 +208,24 @@ class STEPItems:
         width = xmax-xmin + xminm + xmaxm
         depth = ymax-ymin + yminm + ymaxm
         height = zmax -zmin + zminm + zmaxm
+        return width, depth, height, (xmin-xminm, ymin-yminm, zmin-zminm)
+    
+    def enclose(self, 
+                margin: float = None,
+                x_margins: tuple[float, float] = (None, None),
+                y_margins: tuple[float, float] = (None, None),
+                z_margins: tuple[float, float] = (None, None)) -> Box:
+        """Create an enclosing bounding box for the step model.
 
-        return Box(width, depth, height, (xmin-xminm, ymin-yminm, zmin-zminm)).background()
+        Args:
+            margin (float, optional): _description_. Defaults to 0.
+            x_margins (tuple[float, float], optional): _description_. Defaults to (0., 0.).
+            y_margins (tuple[float, float], optional): _description_. Defaults to (0., 0.).
+            z_margins (tuple[float, float], optional): _description_. Defaults to (0., 0.).
+
+        Returns:
+            Box: _description_
+        """
+        
+        return Box(*self.enclose_params(margin, x_margins, y_margins, z_margins)).background()
     

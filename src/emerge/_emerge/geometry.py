@@ -94,10 +94,10 @@ class _GeometryManager:
         self.sign_in(modelname)
     
     def lowest_priority(self) -> int:
-        return min([geo._priority for geo in self.all_geometries()])
+        return min([geo._base_priority for geo in self.all_geometries()])
     
     def highest_priority(self) -> int:
-        return min([geo._priority for geo in self.all_geometries()])
+        return max([geo._base_priority for geo in self.all_geometries()])
     
 class _FacePointer:
     """The FacePointer class defines a face to be selectable as a
@@ -258,7 +258,8 @@ class GeoObject:
         self._hidden: bool = False
         self._key = _GENERATOR.new()
         self._aux_data: dict[str, Any] = dict()
-        self._priority: int = 10
+        self._base_priority: int = 10.0
+        self._sub_priority: int = 0
 
         self._exists: bool = True
         
@@ -266,6 +267,15 @@ class GeoObject:
         _GEOMANAGER.submit_geometry(self)
         self._fill_face_pointers()
         
+    @property
+    def _priority(self) -> float:
+        """The Priority of the geometry material
+
+        Returns:
+            float: _description_
+        """
+        return self._base_priority + self._sub_priority / 2
+    
     def _fill_face_pointers(self) -> None:
         """ Fills the list of all face pointers of this object
         """
@@ -364,17 +374,22 @@ class GeoObject:
         out: GeoObject | None = None
         for obj in objects:
             tags.extend(obj.tags)
+            obj.deactivate()
+        
         if dim==2:
             out = GeoSurface(tags)
         elif dim==3:
             out = GeoVolume(tags)
         else:
             out = GeoObject(tags)
+            
         out.material = objects[0].material
+        out.prio_set(objects[0]._priority)
+        out.name = f'MergedGeometries{[obj.name for obj in objects]}'
         return out
     
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({self.dim},{self.tags})'
+        return f'{self.__class__.__name__}({self.name},{self.dim},{self.tags})'
 
     def _data(self, *labels) -> tuple[Any | None, ...]:
         return tuple([self._aux_data[lab] for lab in labels])
@@ -510,7 +525,7 @@ class GeoObject:
             GeoObject: This same object
         """
         self.material = material
-        self.prio_up()
+        self._prio_half_up()
         return self
     
     def prio_set(self, level: int) -> GeoObject:
@@ -525,9 +540,18 @@ class GeoObject:
         Returns:
             GeoObject: The same object
         """
-        self._priority = level
+        self._base_priority = int(level)
         return self
     
+    def _prio_half_up(self) -> GeoObject:
+        """Adds one half to the priority
+
+        Returns:
+            GeoObject: _description_
+        """
+        
+        self._sub_priority = 1
+        
     def above(self, other: GeoObject) -> GeoObject:
         """Puts the priority of this object one higher than the other, then returns this object
 
@@ -537,7 +561,7 @@ class GeoObject:
         Returns:
             GeoObject: This object
         """
-        self._priority = other._priority + 1
+        self._base_priority = other._base_priority + 1.0
         return self
     
     def below(self, other: GeoObject) -> GeoObject:
@@ -549,7 +573,7 @@ class GeoObject:
         Returns:
             GeoObject: This object
         """
-        self._priority = other._priority -1
+        self._base_priority = other._base_priority - 1
         return self
         
     def prio_up(self) -> GeoObject:
@@ -558,7 +582,7 @@ class GeoObject:
         Returns:
             GeoObject: _description_
         """
-        self._priority += 1
+        self._base_priority += 1
         return self
     
     def prio_down(self) -> GeoObject:
@@ -567,7 +591,7 @@ class GeoObject:
         Returns:
             GeoObject: _description_
         """
-        self._priority -= 1
+        self._base_priority -= 1
         return self
 
     def background(self) -> GeoObject:
@@ -576,7 +600,7 @@ class GeoObject:
         Returns:
             GeoObject: _description_
         """
-        self._priority = _GEOMANAGER.lowest_priority()-10
+        self._base_priority = _GEOMANAGER.lowest_priority()-10
         return self
 
     def foreground(self) -> GeoObject:
@@ -585,7 +609,7 @@ class GeoObject:
         Returns:
             GeoObject: _description_
         """
-        self._priority = _GEOMANAGER.highest_priority()+10
+        self._base_priority = _GEOMANAGER.highest_priority()+10
         return self
     
     def boundary(self, 
@@ -713,9 +737,16 @@ class GeoObject:
         return GeoObject(tags)
     
     def remove(self) -> None:
+        """Delete the geometry from the simulation model
+        """
         self._exists = False
         gmsh.model.occ.remove(self.dimtags, True)
     
+    def deactivate(self) -> None:
+        """Make the geometry not considered as a valid EMerge geometry
+        """
+        self._exists = False
+        
     def extract(self, tags: int | list[int]) -> GeoObject:
         """Returns a new GeoObject of the same dimensional type that isolates a set of given tags
 

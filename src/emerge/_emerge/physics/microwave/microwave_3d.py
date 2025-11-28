@@ -44,6 +44,7 @@ from itertools import product
 import numpy as np
 import threading
 import time
+from collections import defaultdict
 
 class SimulationError(Exception):
     pass
@@ -875,31 +876,45 @@ class Microwave3D:
     
     def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
         '''Retrieve the material properties of the geometry'''
-        #arry = np.zeros((3,3,self.n_tets,), dtype=np.complex128)
+        
+        # Reset index assingments
         for vol in volumes:
             vol.material.reset()
         
+        # collect all materials
         materials = []
+        assignment_dict: dict[int, list[GeoVolume]] = defaultdict(list)
         i = 0
         for vol in volumes:
+            for tag in vol.tags:
+                assignment_dict[tag].append(vol)
             if vol.material not in materials:
                 materials.append(vol.material)
                 vol.material._hash_key = i
                 i += 1
-            
+        
+        # Check competing priorities!
+        for domaintag, volumelist in assignment_dict.items():
+            priolist = [vol._priority for vol in volumelist]
+            maxprio = max(priolist)
+            if priolist.count(maxprio) > 1:
+                volumes = [vol for vol in volumelist if vol._priority==maxprio]
+                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
+                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
+                
         xs = self.mesh.centers[0,:]
         ys = self.mesh.centers[1,:]
         zs = self.mesh.centers[2,:]
         
         matassign = -1*np.ones((self.mesh.n_tets,), dtype=np.int64)
         
+        
         for volume in sorted(volumes, key=lambda x: x._priority):
         
             for dimtag in volume.dimtags:
                 
                 tet_ids = self.mesh.get_tetrahedra(dimtag[1])
-            
-                #tet_ids = np.array([self.mesh.tet_t2i[t] for t in etags])
+                
                 matassign[tet_ids] = volume.material._hash_key
         
         for mat in materials:
@@ -1184,7 +1199,7 @@ class Microwave3D:
                     logger.debug(f'[{bc.port_number}] Passive amplitude = {np.abs(pfield):.3f}')
                     scalardata.write_S(bc.port_number, active_port.port_number, pfield/Pout)
                     if abs(pfield/Pout) > 1.0:
-                        logger.warning(f'S-parameter > 1.0 detected: {np.abs(pfield/Pout)}')
+                        logger.warning(f'S-parameter ({bc.port_number},{active_port.port_number}) > 1.0 detected: {np.abs(pfield/Pout)}')
                         not_conserved = True
                         conserve_margin = abs(pfield/Pout) - 1.0
                 active_port.active=False

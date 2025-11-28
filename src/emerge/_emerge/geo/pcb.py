@@ -28,7 +28,7 @@ from .pcb_tools.calculator import PCBCalculator
 from ..logsettings import DEBUG_COLLECTOR
 import numpy as np
 from loguru import logger
-from typing import Literal, Callable, overload
+from typing import Literal, Callable, overload, Generator
 from dataclasses import dataclass
 
 import math
@@ -118,6 +118,10 @@ class RouteElement:
         self.y: float = None
         self.direction: np.ndarray = None
         self.dirright: np.ndarray = None
+        self.rcutnext: bool = False
+        self.rcutprev: bool = False
+        self.lcutnext: bool = False
+        self.lcutprev: bool = False
     
     @property
     def xy(self) -> tuple[float, float]:
@@ -154,9 +158,14 @@ class StripLine(RouteElement):
         self.width = width
         self.direction = normalize(np.array(direction))
         self.dirright = np.array([self.direction[1], -self.direction[0]])
+        self.rcutnext: bool = False
+        self.rcutprev: bool = False
+        self.lcutnext: bool = False
+        self.lcutprev: bool = False
 
     def __str__(self) -> str:
         return f'StripLine[{self.x},{self.y},w={self.width},d=({self.direction})]'
+    
     @property
     def right(self) -> list[tuple[float, float]]:
         return [(self.x + self.width/2 * self.dirright[0], self.y + self.width/2 * self.dirright[1])]
@@ -174,7 +183,8 @@ class StripTurn(RouteElement):
                  direction: tuple[float, float],
                  angle: float,
                  corner_type: str = 'round',
-                 champher_distance: float | None = None):
+                 champher_distance: float | None = None,
+                 dsratio: float = 1.0):
         self.xold: float = x
         self.yold: float = y
         self.width: float = width
@@ -183,9 +193,20 @@ class StripTurn(RouteElement):
         self.angle: float = angle
         self.corner_type: str = corner_type
         self.dirright: np.ndarray = np.array([self.old_direction[1], -self.old_direction[0]])
+        self.rcutnext: bool = False
+        self.rcutprev: bool = False
+        self.lcutnext: bool = False
+        self.lcutprev: bool = False
         
+        hang = np.abs(angle * np.pi/180 * 0.5)
         if champher_distance is None:
-            self.champher_distance: float = 0.75 * self.width*np.tan(np.abs(angle)/2*np.pi/180)
+            self.champher_distance: float = dsratio*self.width/(np.cos(hang)*np.cos(np.pi/2 - hang))
+            if self.champher_distance > self.width*np.tan(hang):
+                if self.angle>0:
+                    self.lcutprev = True
+                else:
+                    self.rcutprev = True
+            #self.champher_distance: float = 0.75 * self.width*np.tan(np.abs(angle)/2*np.pi/180)
         else:
             self.champher_distance: float = champher_distance
 
@@ -212,7 +233,8 @@ class StripTurn(RouteElement):
         xr = self.xold + self.width/2 * self.dirright[0]
         yr = self.yold + self.width/2 * self.dirright[1]
 
-        dist = min(self.width*np.sqrt(2), self.width * np.tan(np.abs(self.angle)/2*np.pi/180))        
+        #dist = min(self.width*np.sqrt(2), self.width * np.tan(np.abs(self.angle)/2*np.pi/180))
+        dist = self.width * np.tan(np.abs(self.angle)/2*np.pi/180)
 
         dcorner = self.width*(_rot_mat(self.angle) @ self.dirright)
 
@@ -222,7 +244,7 @@ class StripTurn(RouteElement):
         out = [(xend, yend)]
 
         if self.corner_type == 'champher':
-            dist = max(0.0, dist - self.champher_distance)
+            dist = dist - self.champher_distance
         
         if dist==0:
             return  out
@@ -235,7 +257,8 @@ class StripTurn(RouteElement):
         if self.corner_type == 'champher':
             x2 = xend - dist * self.direction[0]
             y2 = yend - dist * self.direction[1]
-
+            if self.rcutprev:
+                return [(x1, y1), (x2, y2)]
             return [(x1, y1), (x2, y2), (xend, yend)]
         else:
             raise RouteException(f'Trying to route a StripTurn with an unknown corner type: {self.corner_type}')
@@ -251,8 +274,9 @@ class StripTurn(RouteElement):
         xr = self.xold + self.width/2 * self.dirright[0]
         yr = self.yold + self.width/2 * self.dirright[1]
         
-        dist = min(self.width*np.sqrt(2), self.width * np.tan(np.abs(self.angle)/2*np.pi/180))        
-
+        #dist = min(self.width*np.sqrt(2), self.width * np.tan(np.abs(self.angle)/2*np.pi/180))        
+        dist = self.width * np.tan(np.abs(self.angle)/2*np.pi/180)
+        
         dcorner = self.width*(_rot_mat(self.angle) @ -self.dirright)
 
         xend = xr + dcorner[0]
@@ -261,7 +285,7 @@ class StripTurn(RouteElement):
         out = [(xend, yend)]
 
         if self.corner_type == 'champher':
-            dist =max(0.0, dist - self.champher_distance)
+            dist = dist - self.champher_distance
         
         if dist==0:
             return  out
@@ -270,12 +294,13 @@ class StripTurn(RouteElement):
         y1 = yl + dist * self.old_direction[1]
 
         if self.corner_type == 'square':
-            return [(xend, yend), (x1, y1)]
+            return [(x1, y1),(xend, yend)]#[(xend, yend), (x1, y1)]
         if self.corner_type == 'champher':
             x2 = xend - dist * self.direction[0]
             y2 = yend - dist * self.direction[1]
-
-            return [(xend, yend), (x2, y2), (x1, y1)]
+            if self.lcutprev:
+                return [(x1, y1), (x2, y2)]
+            return [(x1, y1), (x2,y2), (xend, yend)]#[(xend, yend), (x2, y2), (x1, y1)]
         else:
             raise RouteException(f'Trying to route a StripTurn with an unknown corner type: {self.corner_type}')
  
@@ -297,6 +322,10 @@ class StripCurve(StripTurn):
         self.radius: float = radius
         self.dirright: np.ndarray = np.array([self.old_direction[1], -self.old_direction[0]])
         self.dang: float = dang
+        self.rcutnext: bool = False
+        self.rcutprev: bool = False
+        self.lcutnext: bool = False
+        self.lcutprev: bool = False
 
         angd = abs(angle*np.pi/180)
         self.start = np.array([x,y])
@@ -334,7 +363,7 @@ class StripCurve(StripTurn):
             pnew = self.circ_origin + R*(self._xhat*np.cos(ang)+self._yhat*np.sin(ang))
             points.append((pnew[0], pnew[1]))
         
-        return points[::-1]
+        return points
 
 class PCBPoly:
     _DEFNAME: str = 'Poly'
@@ -379,6 +408,17 @@ class StripPath:
         self.z: float = 0
         self.name: str = _NAME_MANAGER(name, self._DEFNAME)
 
+    
+    def iter_right(self) -> Generator[tuple[RouteElement, RouteElement, RouteElement], None, None]:
+        N = len(self.path)
+        for i in range(N):
+            yield self.path[(i-1)%N], self.path[i], self.path[(i+1)%N]
+            
+    def iter_left(self) -> Generator[tuple[RouteElement, RouteElement, RouteElement], None, None]:
+        N = len(self.path)
+        for i in range(N):
+            yield self.path[(i-1)%N], self.path[i], self.path[(i+1)%N]
+            
     def _has(self, element: RouteElement) -> bool:
         if element in self.path:
             return True
@@ -489,19 +529,22 @@ class StripPath:
         
         return self
     
-    def turn(self, angle: float, 
+    def turn(self, 
+             angle: float, 
              width: float | None = None, 
-             corner_type: Literal['champher','square'] = 'champher') -> StripPath:
+             corner_type: Literal['champher','square'] = 'square',
+             dsratio: float = 0.7) -> StripPath:
         """Adds a turn to the strip path.
 
         The angle is specified in degrees. The width of the turn will be the same as the last segment.
         optionally, a different width may be provided. 
-        By default, all corners will be cut using the "champher" type. Other options are not yet provided.
+        By default, all corners will be cut using the "square" type. Other options are not yet provided.
 
         Args:
             angle (float): The turning angle
             width (float, optional): The stripline width. Defaults to None.
             corner_type (str, optional): The corner type. Defaults to 'champher'.
+            dsratio: (float, optional): The chamfer distance expressed as the proportional of the corner diagonal.
 
         Returns:
             StripPath: The current StripPath object
@@ -516,12 +559,11 @@ class StripPath:
                 self._add_element(StripLine(x, y, width, (dx, dy)))
         else:
             width=self.end.width
-        self._add_element(StripTurn(x, y, width, (dx, dy), angle, corner_type))
+        self._add_element(StripTurn(x, y, width, (dx, dy), angle, corner_type, dsratio=dsratio))
         return self
 
     def curve(self, angle: float, radius: float,
-             width: float | None = None, 
-             corner_type: Literal['champher','square'] = 'champher',
+             width: float | None = None,
              dang: float = 10) -> StripPath:
         """Adds a bend to the strip path.
 
@@ -532,7 +574,6 @@ class StripPath:
         Args:
             angle (float): The turning angle
             width (float, optional): The stripline width. Defaults to None.
-            corner_type (str, optional): The corner type. Defaults to 'champher'.
 
         Returns:
             StripPath: The current StripPath object
@@ -561,8 +602,11 @@ class StripPath:
         Returns:
             StripPath: The current StripPath object.
         """
-        self.pcb.stored_striplines[name] = self.end
+        self.pcb.stored_striplines[str(name)] = self.end
         return self
+    
+    def __getitem__(self, name: str) -> StripPath:
+        return self.store(name)
     
     def split(self, 
               direction: tuple[float, float]  | None= None,
@@ -672,7 +716,8 @@ class StripPath:
             direction: tuple[float, float] | None = None,
             width: float | None = None,
             extra: float | None = None,
-            segments: int = 6) -> StripPath:
+            segments: int = 6,
+            reverse: float = 0.0) -> StripPath:
         """Adds a via to the circuit
 
         If proceed is set to True, a new StripPath will be started. The width and direction properties
@@ -688,6 +733,7 @@ class StripPath:
             width (float, optional): The new width. Defaults to None.
             extra (float, optional): How much extra stripline to add around the via. Defaults to None.
             segments (int, optional): The number of via polygon sections. Defaults to 6.
+            reverse (float, optional): A distance to place the via back in the direction the stripline is coming from. Defaults to 0.0.
 
         Returns:
             StripPath: The new StripPath object
@@ -695,11 +741,17 @@ class StripPath:
         
         if extra is None:
             extra = self.end.width/2
+        
+        dx, dy = self.end.direction
+        
         x, y = self.end.x, self.end.y
+        x = x - dx*reverse
+        y = y - dy*reverse
         z1 = self.z
         z2 = znew
         if extra > 0:
             self.straight(extra)
+        
         self.pcb.vias.append(Via(x,y,z1,z2,radius, segments))
         if proceed:
             if width is None:
@@ -711,8 +763,23 @@ class StripPath:
             return self.pcb.new(x-dx, y-dy, width, direction, z2)
         return self
     
-    def short(self) -> StripPath:
-        self.via(self.pcb.z(1), self.end.width/3, False)
+    def short(self, 
+              ground_layer: int = 1,
+              radius: float | None = None,
+              reverse: float = 0) -> StripPath:
+        """Create a short circuit via at the current location.
+
+        Args:
+            ground_layer (int, optional): The layer number to short to. Defaults to 1.
+            radius (float | None, optional): The via radius. Defaults to None.
+            reverse (float, optional): A displacement distance in the reverse direction. Defaults to 0.
+
+        Returns:
+            StripPath: _description_
+        """
+        if radius is None:
+            radius = self.end.width/3
+        self.via(self.pcb.z(ground_layer), radius, False, reverse=reverse)
         return self
 
     def jump(self, 
@@ -1101,10 +1168,27 @@ class PCB:
                 return path.z
         raise RouteException('Requesting z-height of route element that is not contained in a path.')
     
-    def __call__(self, path_nr: int) -> StripPath:
-        if path_nr >= len(self.paths):
-            self.paths.append(StripPath(self))
-        return self.paths[path_nr]
+    def __call__(self, name: str) -> StripLine:
+        """A quick way to call self.load(x)
+
+        Args:
+            name (str): The name of the StriLine segment
+
+        Returns:
+            StripLine: The stripline element
+        """
+        return self.load(name)
+    
+    def __getitem__(self, name: str) -> StripLine:
+        """A quick way to call self.load(x)
+
+        Args:
+            name (str): The name of the StriLine segment
+
+        Returns:
+            StripLine: The stripline element
+        """
+        return self.load(name)
     
     def _gen_poly(self, xys: list[tuple[float, float]], z: float, name: str | None = None) -> GeoPolygon | GeoVolume:
         """ Generates a GeoPoly out of a list of (x,y) coordinate tuples.
@@ -1191,6 +1275,7 @@ class PCB:
             name (str): The name of the x,y coordinate
             
         """
+        name = str(name)
         if name in self.stored_striplines:
             return self.stored_striplines[name]
         else:
@@ -1408,13 +1493,16 @@ class PCB:
         self.paths.append(path)  
         return path
     
-    def lumped_port(self, stripline: StripLine, z_ground: float | None = None, name: str | None = 'LumpedPort') -> GeoPolygon:
+    def lumped_port(self, stripline: StripLine | str, z_ground: float | None = None, name: str | None = 'LumpedPort') -> GeoPolygon:
         """Generate a lumped-port object to be created.
 
         Args:
             stripline (StripLine): _description_
         """
         
+        if not isinstance(stripline, StripLine):
+            stripline = self.load(stripline)
+            
         xy1 = stripline.right[0]
         xy2 = stripline.left[0]
         z = self._get_z(stripline)
@@ -1448,7 +1536,7 @@ class PCB:
         return poly
 
     def modal_port(self,
-                  point: StripLine,
+                  point: StripLine | str,
                   height: float | tuple[float, float],
                   width_multiplier: float = 5.0,
                   width: float | None = None,
@@ -1468,6 +1556,10 @@ class PCB:
         Returns:
             GeoSurface: The GeoSurface object that can be used for the waveguide.
         """
+        
+        if not isinstance(point, StripLine):
+            point = self.load(point)
+        
         if isinstance(height, tuple):
             dz, height = height
         else:
@@ -1567,12 +1659,28 @@ class PCB:
         for path in self.paths:
             z = path.z
             self.zs.append(z)
-            xys = []
-            for elemn in path.path:
-                xys.extend(elemn.right)
-            for element in path.path[::-1]:
-                xys.extend(element.left)
+            xysL = []
+            xysR = []
+            
+            for eprev, elemn, enext in path.iter_right():
+                coords = elemn.right
+                if enext.rcutprev and coords:
+                    coords.pop(-1)
+                if eprev.rcutnext and coords:
+                    coords.pop(0)
+                
+                xysR.extend(coords)
+                
+            for eprev, elemn, enext in path.iter_left():
+                coords = elemn.left
+                if enext.lcutprev and coords:
+                    coords.pop(-1)
+                if eprev.lcutnext and coords:
+                    coords.pop(0)
+                
+                xysL.extend(coords)
 
+            xys = xysR + xysL[::-1]
             xm, ym = xys[0]
             xys2 = [(xm,ym),]
             

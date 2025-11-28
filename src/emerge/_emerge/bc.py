@@ -46,6 +46,7 @@ class BoundaryCondition:
     _color: str = "#a54141"
     _name: str = "UnnamedBC"
     _texture: str = "None"
+    
     def __init__(self, assignment: GeoObject | Selection):
 
         self.dimension: BCDimension = BCDimension.ANY
@@ -59,6 +60,10 @@ class BoundaryCondition:
         
         self.selection: Selection = assignment
         self.tags: list[int] = self.selection.tags
+    
+    @property
+    def _size_constraint(self) -> float | None:
+        return None
     
     @property
     def dim(self) -> int:

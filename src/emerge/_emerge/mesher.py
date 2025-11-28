@@ -23,7 +23,7 @@ import numpy as np
 from typing import Iterable, Callable, Any, TypeVar
 from loguru import logger
 from enum import Enum
-from .bc import Periodic
+from .bc import Periodic, BoundaryCondition
 
 class MeshError(Exception):
     pass
@@ -101,7 +101,7 @@ class Mesher:
     
     @property
     def volumes(self) -> list[GeoVolume]:
-        return [obj for obj in self.objects if isinstance(obj, GeoVolume)]
+        return [obj for obj in self.objects if isinstance(obj, GeoVolume) and obj._exists]
     
     @property
     def domain_boundary_face_tags(self) -> list[int]:
@@ -125,6 +125,7 @@ class Mesher:
         if self.max_size is None or self.min_size is None:
             raise MeshError('Either maximum or minimum mesh size is undefined. Make sure \
                             to set the simulation frequency range before calling mesh instructions.')
+    
     
     def submit_objects(self, objects: GeoObject | list[GeoObject] | list[list[GeoObject]]) -> None:
         """Takes al ist of GeoObjects and computes the fragment. 
@@ -246,6 +247,21 @@ class Mesher:
         gmsh.model.mesh.field.set_number(ctag, "VIn", max_size)
         self._amr_fields.append(ctag)
 
+    def _configure_bc_size(self, bcs: list[BoundaryCondition]) -> None:
+        """Writes size constraints for the boundary conditions
+
+        Args:
+            bcs (list[BoundaryCondition]): List of all the boundary conditions
+        """
+        for bc in bcs:
+            if bc._size_constraint is None:
+                continue
+            if bc.dim != 2:
+                continue
+            size = bc._size_constraint
+            logger.debug(f'Setting size constraint for {bc} of size {size*1000:.2f}mm')
+            self.set_face_size(bc.selection, size)
+            
     def _configure_mesh_size(self, discretizer: Callable, resolution: float):
         """Defines the mesh sizes based on a discretization callable.
         The discretizer must take a material and return a maximum
@@ -327,7 +343,7 @@ class Mesher:
 
         @njit(f8(i8,i8,f8,f8,f8,f8), nogil=True, fastmath=True, parallel=False)
         def func(dim, tag, x, y, z, lc):
-            sizes = np.maximum(newsize, A - B * _qf*np.clip(np.sqrt((x-xs)**2 + (y-ys)**2 + (z-zs)**2) - newsize/3, a_min=0, a_max=None))
+            sizes = np.maximum(newsize, A - B * _qf*np.clip(np.sqrt((x-xs)**2 + (y-ys)**2 + (z-zs)**2) - newsize*0, a_min=0, a_max=None))
             return min(lc,  float(np.min(sizes)))
         
         gmsh.model.mesh.setSizeCallback(func)
