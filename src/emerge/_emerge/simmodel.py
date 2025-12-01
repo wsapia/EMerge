@@ -930,13 +930,11 @@ class SimulationBeta(Simulation):
             Smats = []
             
             for sf in sim_freqs:
-                data, solve_ids = self.mw._run_adaptive_mesh(step, max_freq)
+                data, solve_ids = self.mw._run_adaptive_mesh(step, sf)
                 datas.append(data)
                 fields.append(data.field[-1])
                 Smats.append(data.scalar[-1].Sp)
                 
-            #field = data.field[-1]
-            #Smat_new = data.scalar[-1].Sp
             S_matrices.append(Smats)
             
             if step > minimum_steps:
@@ -955,7 +953,7 @@ class SimulationBeta(Simulation):
                     
                 logger.info(f'Pass {step}: Convergence = {max_complx:.3f}, Mag = {max_mag:.3f}, Phase = {max_phase:.1f} deg')
                 
-                if conv_complex <= convergence and max_phase < phase_convergence and max_mag < magnitude_convergence:
+                if max_complx <= convergence and max_phase < phase_convergence and max_mag < magnitude_convergence:
                     logger.info(f'Pass {step}: Mesh refinement passed!')
                     passed += 1
                 else:
@@ -1021,6 +1019,12 @@ class SimulationBeta(Simulation):
                 Ratios.append(refinement_ratio)
                 Percentages.append(percentage)
                 
+                if percentage == 0.0:
+                    logger.warning(f'No refinement realized, decreasing refinment ratio.')
+                    refinement_ratio = refinement_ratio * 0.5
+                    self.mesher.set_ratio(refinement_ratio)
+                    continue
+                
                 if percentage < minimum_refinement_percentage or percentage > (minimum_refinement_percentage*2):
                     
                     refinement_ratio = self.compute_ratio(np_percentage, Ratios, Percentages, minimum_refinement_percentage)
@@ -1039,7 +1043,7 @@ class SimulationBeta(Simulation):
                 self.view(plot_mesh=True, volume_mesh=True)
             
             if last_n_tets > max_tets:
-                logger.warning(f'Aborting refinement because the number of tets exceeds the maximum: {last_n_tets>max_tets}')
+                logger.warning(f'Aborting refinement because the number of tets exceeds the maximum: {last_n_tets}>{max_tets}')
                 break
         if passed < min_refined_passes:
             logger.warning('Adaptive mesh refinement did not converge!')

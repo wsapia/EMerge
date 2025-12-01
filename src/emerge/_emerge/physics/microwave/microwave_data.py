@@ -28,6 +28,7 @@ from ...selection import FaceSelection
 from ...geometry import GeoSurface
 from ...mesh3d import Mesh3D
 from ...const import Z0, MU0, EPS0
+from ...coord import Line
 
 EMField = Literal[
     "er", "ur", "freq", "k0",
@@ -844,7 +845,7 @@ class MWField:
     def integrate(self, surface: FaceSelection, gqo: int = 4) -> EHField:
         from ...mth.optimized import generate_int_data_tri
         from ...mth.integrals import gaus_quad_tri
-        
+        logger.warning("Use int_surf instead!")
         DPTS = gaus_quad_tri(gqo)
         tris = self.mesh.get_triangles(surface.tags)
         
@@ -855,6 +856,63 @@ class MWField:
         field.aux['weights'] = W
 
         return field
+    
+    def int_surf(self, surface: FaceSelection, argument: Callable, gqo: int = 4) -> EHField:
+        """Performs a surface integral on the provided surface object. 
+
+        Args:
+            surface (FaceSelection): The surface to integrate
+            quantity (Callable): A function that takes an EH field as argument
+            gqo (int, optional): Gauss Quadrature order. Defaults to 4.
+
+        Returns:
+            EHField: _description_
+        """
+        from ...mth.optimized import generate_int_data_tri
+        from ...mth.integrals import gaus_quad_tri
+        
+        DPTS = gaus_quad_tri(gqo)
+        tris = self.mesh.get_triangles(surface.tags)
+        
+        X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
+        
+        ehfield = self.interpolate(X, Y, Z, False)
+        
+        output = argument(ehfield)
+        
+        if len(output.shape)==2:
+            axis = 1
+        else:
+            axis = 0
+            
+        return np.sum(output*A*W, axis=axis)
+    
+    
+    def int_line(self, line: Line | list[tuple[float, float, float]], argument: Callable) -> EHField:
+        """Performs a line integral on the provided line with the an integral argument.
+
+        Args:
+            line (Line | list[tuple[float, float, float]]): _description_
+            argument (Callable): _description_
+
+        Returns:
+            EHField: _description_
+        """
+        if not isinstance(line, Line):
+            x,y,z = zip(*line)
+            line = Line(x, y, z)
+        
+        nint = self.interpolate(*line.cpoint)
+        dx = np.append(line.dxs, line.dxs[-1])
+        dy = np.append(line.dys, line.dys[-1])
+        dz = np.append(line.dzs, line.dzs[-1])
+        nint.dl = np.array([dx, dy, dz])
+        nint.dlx = dx
+        nint.dly = dy
+        nint.dlz = dz
+        
+        return line._integrate(argument(nint))
+        
         
     def boundary(self,
                  selection: FaceSelection) -> EHField:

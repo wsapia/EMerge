@@ -58,3 +58,79 @@ def coax_rin(rout: float,
     """
     return rout/10**(Z0*np.sqrt(eps_r)/138)
 
+def _move_3_to_last(x: np.ndarray) -> np.ndarray:
+    """
+    Ensure the axis of length 3 is the last axis.
+    Accepts shapes (3,), (3, N), (N, 3).
+    """
+    x = np.asarray(x)
+
+    if x.ndim == 1:
+        if x.shape[0] != 3:
+            raise ValueError(f"1D input must have shape (3,), got {x.shape}")
+        return x  # shape (3,)
+
+    if x.ndim != 2:
+        raise ValueError(f"Input must be 1D or 2D, got {x.ndim}D with shape {x.shape}")
+
+    axes_3 = [i for i, s in enumerate(x.shape) if s == 3]
+    if len(axes_3) != 1:
+        raise ValueError(f"Input must have exactly one axis of length 3, got shape {x.shape}")
+
+    axis_3 = axes_3[0]
+    if axis_3 == x.ndim - 1:
+        return x  # already (..., 3)
+    else:
+        # swap the 3-axis to the last position: (3, N) -> (N, 3)
+        return np.swapaxes(x, axis_3, x.ndim - 1)
+
+
+def dot(A, B):
+    """
+    Dot product along the axis of length 3.
+
+    A, B can be:
+      - (3,)        : single 3-vector
+      - (3, N)      : 3-by-N, treated as N vectors of length 3
+      - (N, 3)      : N-by-3, treated as N vectors of length 3
+
+    Returns:
+      - scalar for (3,)·(3,)
+      - (N,) for pairwise dot of N vectors.
+    """
+    A = _move_3_to_last(np.asarray(A))
+    B = _move_3_to_last(np.asarray(B))
+
+    # Broadcast over non-3 axes (e.g. (N,3) with (3,) -> (N,3))
+    A, B = np.broadcast_arrays(A, B)
+
+    return np.sum(A * B, axis=-1)
+
+
+def cross(A, B):
+    """
+    Cross product along the axis of length 3.
+
+    A, B can be:
+      - (3,)
+      - (3, N)
+      - (N, 3)
+
+    Returns:
+      - (3,) for single cross product
+      - (3, N) for pairwise cross of N vectors.
+    """
+    A = _move_3_to_last(np.asarray(A))
+    B = _move_3_to_last(np.asarray(B))
+
+    # Broadcast over non-3 axes
+    A, B = np.broadcast_arrays(A, B)
+
+    a1, a2, a3 = A[..., 0], A[..., 1], A[..., 2]
+    b1, b2, b3 = B[..., 0], B[..., 1], B[..., 2]
+
+    c1 = a2 * b3 - a3 * b2
+    c2 = a3 * b1 - a1 * b3
+    c3 = a1 * b2 - a2 * b1
+
+    return np.array((c1, c2, c3))

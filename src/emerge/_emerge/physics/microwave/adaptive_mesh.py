@@ -247,7 +247,7 @@ def select_refinement_indices(errors: np.ndarray, refine: float) -> np.ndarray:
     for index in order:
         sum_error += ind[index]
         indices.append(index)
-        if sum_error >= refine*total:
+        if sum_error >= refine*total and len(indices) >= 10:
             break
     
     #cum = np.cumsum(ind[order])
@@ -329,6 +329,9 @@ def reduce_point_set(coords: np.ndarray, gr: float, dss: np.ndarray, scaler: flo
     for i in range(N):
 
         if (N-counter)/N < keep_percentage:
+            break
+        
+        if (N-counter) <= 10:
             break
         
         if current_min[i] <= impressed_size[i,i]*0.8:
@@ -1056,7 +1059,8 @@ def compute_error_single(nodes, tets, tris, edges, centers,
                 continue
             alpha_Nf[iface,it] = alpha_t[it2]
     
-    alpha_f = np.sum((alpha_t/(alpha_t + alpha_Nf + 1e-13))*alpha_Df, axis=0)
+    alpha_f = np.sum((alpha_t/(alpha_t + alpha_Nf + 1e-21))*alpha_Df, axis=0)
+    
     error = (np.abs(alpha_t + alpha_f))**0.5
     
     return error, max_elem_size
