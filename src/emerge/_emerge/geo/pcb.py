@@ -1095,6 +1095,7 @@ class PCB:
         self.xs: list[float] = []
         self.ys: list[float] = []
         self.zs: list[float] = []
+        self._poly_out: list[PCBPoly] = []
 
         self.stored_coords: dict[str,tuple[float, float]] = dict()
         self.stored_striplines: dict[str, StripLine] = dict()
@@ -1199,6 +1200,9 @@ class PCB:
             z (float, optional): The z-height of the polygon. Defaults to the top layer.
             name (str, optional): The name of the polygon.
             """
+        
+        self._poly_out.append(PCBPoly([xy[0] for xy in xys], [xy[1] for xy in xys], z=z))
+        
         ptags = []
         for x,y in xys:
             px, py, pz = self.cs.in_global_cs(x*self.unit, y*self.unit, z*self.unit)

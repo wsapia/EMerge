@@ -26,8 +26,8 @@ class Settings:
         self._mw_cap_sp_col: bool = True
         self._mw_recip_sp: bool = False
         self._size_check: bool = True
-        
-    
+        self._auto_save: bool = False
+        self._save_after_sim: bool = True
 
     ############################################################
     #                            GETTERS                       #
@@ -77,6 +77,19 @@ class Settings:
     def mw_recip_sp(self) -> bool:
         """If reciprodicty should be explicitly enforced"""
         return self._mw_recip_sp
+    
+    @property
+    def auto_save(self) -> bool:
+        """If the simulation should automatically be saved upon a detected abortion of the simulation.
+        """
+        return self._auto_save
+    
+    @property
+    def save_after_sim(self) -> bool:
+        """It the simulation should be saved only if a simulation is completed.
+
+        """
+        return self._save_after_sim
     ############################################################
     #                            SETTERS                       #
     ############################################################
@@ -113,18 +126,32 @@ class Settings:
         self._size_check = value
         
     @mw_cap_sp_single.setter
-    def mw_cap_sp_single(self, value: bool) -> bool:
+    def mw_cap_sp_single(self, value: bool) -> None:
         """If Single S-parameters should be capped with their magnitude to at most 1.0"""
         self._mw_cap_sp_single = value
     
     @mw_cap_sp_col.setter
-    def mw_cap_sp_col(self, value: bool) -> bool:
+    def mw_cap_sp_col(self, value: bool) -> None:
         """If Single S-parameters columns should be power normalized to 1.0"""
         self._mw_cap_sp_col = value
     
     @mw_recip_sp.setter
-    def mw_recip_sp(self, value: bool) -> bool:
+    def mw_recip_sp(self, value: bool) -> None:
         """If reciprodicty should be explicitly enforced"""
         self._mw_recip_sp = value
+        
+    @auto_save.setter
+    def auto_save(self, value: bool) -> None:
+        """If the simulation should automatically be saved upon a detected abortion of the simulation.
+      
+        """
+        self._auto_save = value
+        
+    @save_after_sim.setter
+    def save_after_sim(self, value: bool) -> None:
+        """It the simulation should be saved only if a simulation is completed.
+
+        """
+        self._save_after_sim = value
     
 DEFAULT_SETTINGS = Settings()

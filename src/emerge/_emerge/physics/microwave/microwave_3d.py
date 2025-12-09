@@ -135,9 +135,9 @@ class Microwave3D:
         self._bc_initialized: bool = False
         self._simstart: float = 0.0
         self._simend: float = 0.0
-        
         self._container: dict[str, Any] = dict()
-
+        self._completed: bool = False
+        
     @property
     def _params(self) -> dict[str, float]:
         return self._state.params
@@ -691,7 +691,7 @@ class Microwave3D:
         Returns:
             MWSimData: The dataset.
         """
-        
+        self._completed = False
         self._simstart = time.time()
         if self.bc._initialized is False:
             raise SimulationError('Cannot run a modal analysis because no boundary conditions have been assigned.')
@@ -872,6 +872,7 @@ class Microwave3D:
         self.solveroutine.reset()
         ### Compute S-parameters and return
         self._post_process(results, matset)
+        self._completed = True
         return self.data
     
     def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
@@ -898,10 +899,10 @@ class Microwave3D:
             priolist = [vol._priority for vol in volumelist]
             maxprio = max(priolist)
             if priolist.count(maxprio) > 1:
-                volumes = [vol for vol in volumelist if vol._priority==maxprio]
-                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
-                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
-                
+                vols = [vol for vol in volumelist if vol._priority==maxprio]
+                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+            
         xs = self.mesh.centers[0,:]
         ys = self.mesh.centers[1,:]
         zs = self.mesh.centers[2,:]
@@ -917,6 +918,8 @@ class Microwave3D:
                 
                 matassign[tet_ids] = volume.material._hash_key
         
+        if np.any(matassign==-1):
+            raise SimulationError(f'Tetrahedra detected with unassigned materials: {np.argwhere(matassign==-1)}')
         for mat in materials:
             ids = np.argwhere(matassign==mat._hash_key).flatten()
             mat.initialize(xs[ids], ys[ids], zs[ids], ids)

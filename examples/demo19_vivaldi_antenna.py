@@ -45,7 +45,6 @@ fy = lambda t: (g/2)*K**t + (W-g*K)/(2-2*K) *(1-K**t)
 # We will create the slots around the vivaldi by making slots that stretch across the entire
 # PCB and then removing the exponential taper region dilated by some 5 millimeters.
 # We could use a curve dilation but in this case we will derive the analytical expresion ourselves!
-# 
 
 # This A-coeff is just to make the equations more brief.
 A = (g/2) - (W-g*K)/(2-2*K)

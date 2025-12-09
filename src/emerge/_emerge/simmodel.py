@@ -188,6 +188,18 @@ class Simulation:
             signal.signal(signum, signal.SIG_DFL)
             os.kill(os.getpid(), signum)
 
+    def _autosave(self):
+        """Called by atexit as an emergency matter.
+        """
+        if not self.settings.auto_save:
+            return
+        
+        if not self.settings.save_after_sim:
+            if not self.mw._completed:
+                return
+            
+        self._exit_gmsh()
+        
     def _initialize_simulation(self):
         """Initializes the Simulation data and GMSH API with proper shutdown routines.
         """
@@ -202,7 +214,7 @@ class Simulation:
             self._install_signal_handlers()
 
             # Restier the Exit GMSH function on proper program abortion
-            register(self._exit_gmsh)
+            register(self._autosave)
         else:
             gmsh.finalize()
             gmsh.initialize()
@@ -221,6 +233,7 @@ class Simulation:
         # If the simulation object state is still active (GMSH is running)
         if not self.__active:
             return
+        
         logger.debug('Exiting program')
         
         if DEBUG_COLLECTOR.any_warnings:
@@ -507,6 +520,8 @@ class Simulation:
             
             if face_labels and geo.dim==3:
                 for face_name in geo._face_pointers.keys():
+                    if geo.face(face_name).invalid:
+                        continue
                     self.display.add_object(geo.face(face_name), color='yellow', opacity=0.1, label=face_name)
         if selections:
             [self.display.add_object(sel, color='red', opacity=0.6, label=sel.name) for sel in selections]

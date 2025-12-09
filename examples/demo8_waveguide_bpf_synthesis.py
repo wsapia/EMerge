@@ -94,7 +94,7 @@ with em.Simulation('IrisSim') as sim:
         sim.mw.set_resolution(0.10)
         sim.mesher.set_domain_size(iris, 2*mm)
         sim.generate_mesh()
-
+        
         # Port BCs on front/back faces for TE10 excitation
         sim.mw.bc.RectangularWaveguide(wg1.front, 1)
         sim.mw.bc.RectangularWaveguide(wg2.back, 2)
