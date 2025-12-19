@@ -760,10 +760,12 @@ class RectangularWaveguide(PortBC):
     _color: str = "#e1bd1c"
     _name: str = "RectWG"
     _texture: str = "tex5.png"
+    
     def __init__(self, 
                  face: FaceSelection | GeoSurface,
                  port_number: int, 
                  mode: tuple[int, int] = (1,0),
+                 er: float = 1.0,
                  cs: CoordinateSystem | None = None,
                  dims: tuple[float, float] | None = None,
                  power: float = 1):
@@ -779,6 +781,7 @@ class RectangularWaveguide(PortBC):
             face (FaceSelection, GeoSurface): The port boundary face selection
             port_number (int): The port number
             mode: (tuple[int, int], optional): The TE mode number. Defaults to (1,0).
+            er: (float, optional): The Dielectric constant. Defaults to 1.0.
             cs (CoordinateSystem, optional): The local coordinate system. Defaults to None.
             dims (tuple[float, float], optional): The port face. Defaults to None.
             power (float): The port power. Default to 1.
@@ -790,7 +793,10 @@ class RectangularWaveguide(PortBC):
         self.power: float = power
         self.type: str = 'TE'
         self.mode: tuple[int,int] = mode
-
+        self.mode_axis: Axis | None = None
+        self.er: float = er
+        self._polarization: float = 1.0
+        
         if dims is None:
             logger.debug(f" - Establishing RectangularWaveguide port face based on selection {self.selection}")
             cs, (width, height) = self.selection.rect_basis() # type: ignore
@@ -806,7 +812,20 @@ class RectangularWaveguide(PortBC):
             logger.info(' - Constructing coordinate system from normal port')
             self.cs = Axis(self.selection.normal).construct_cs()
             logger.debug(f' - Port CS: {self.cs}')
+        
     
+    def align_modes(self, axis: Axis) -> None:
+        """Defines the positive E-field direction for the fundamental TE mode.
+
+        Args:
+            axis (Axis): The alignment vector for the mode
+        """
+
+        self.mode_axis = axis
+        self._polarization: float = float(np.sign(self.cs.yax.dot(self.mode_axis)))
+        if self._polarization == 0.0:
+            self._polarization = 1.0
+        
     def get_basis(self) -> np.ndarray:
         return self.cs._basis
         
@@ -828,7 +847,7 @@ class RectangularWaveguide(PortBC):
         ''' Return the out of plane propagation constant. βz.'''
         width=self.dims[0]
         height=self.dims[1]
-        beta = np.sqrt(k0**2 - (np.pi*self.mode[0]/width)**2 - (np.pi*self.mode[1]/height)**2)
+        beta = np.sqrt(self.er*k0**2 - (np.pi*self.mode[0]/width)**2 - (np.pi*self.mode[1]/height)**2)
         return beta
     
     def get_gamma(self, k0: float) -> complex:
@@ -855,8 +874,8 @@ class RectangularWaveguide(PortBC):
         width = self.dims[0]
         height = self.dims[1]
         m, n= self.mode
-        Ev = self.get_amplitude(k0)*np.cos(np.pi*m*(x_local)/width)*np.cos(np.pi*n*(y_local)/height)
-        Eh = self.get_amplitude(k0)*np.sin(np.pi*m*(x_local)/width)*np.sin(np.pi*n*(y_local)/height)
+        Ev = self._polarization*self.get_amplitude(k0)*np.cos(np.pi*m*(x_local)/width)*np.cos(np.pi*n*(y_local)/height)
+        Eh = self._polarization*self.get_amplitude(k0)*np.sin(np.pi*m*(x_local)/width)*np.sin(np.pi*n*(y_local)/height)
         Ex = Eh
         Ey = Ev
         Ez = 0*Eh

@@ -40,8 +40,13 @@ cudss12 = [
   "nvmath-python[cu12]==0.5.0",
   "cupy-cuda12x"
 ]
+
 dxf = [
   "ezdxf"
+]
+
+gerber = [
+  "pygerber"
 ]
 
 [build-system]
@@ -54,6 +59,7 @@ dev = [
     "pytest>=8.4.1",
     "scikit-umfpack>=0.4.2",
     "threadpoolctl>=3.6.0",
+    "pygerber",
 ]
 
 [tool.uv]
