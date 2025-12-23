@@ -447,16 +447,26 @@ class Mesh3D(Mesh):
             tets = tri_to_tet[itri]
             self.tri_to_tet[:len(tets), itri] = tets
         
-        _, tet_tags, tet_node_tags = gmsh.model.mesh.get_elements(2)
+        _, tri_tags, tri_node_tags = gmsh.model.mesh.get_elements(2)
         
         # The algorithm assumes that only one domain tag is returned in this function. 
         # Hence the use of tri_node_tags[0] in the next line. If domains are missing.
         # Make sure to combine all the entries in the tri-node-tags list
-        tet_node_tags = [self.n_t2i[int(t)] for t in tet_node_tags[0]]
-        tet_tags = np.squeeze(np.array(tet_tags))
+        # assuming only one element type here (tri3)
+        tri_tags = np.array(tri_tags[0], dtype=int)
+        tri_nodes = np.array([self.n_t2i[int(t)] for t in tri_node_tags[0]], dtype=int).reshape(-1, 3)
 
-        self.tri_i2t = {self.get_tri(*self.tris[:,i]): int(t) for i, t in enumerate(tet_tags)}
+        self.tri_i2t = {}
+        for k, tag in enumerate(tri_tags):
+            tri_id = self.get_tri(tri_nodes[k,0], tri_nodes[k,1], tri_nodes[k,2])
+            self.tri_i2t[tri_id] = int(tag)
+
         self.tri_t2i = {t: i for i, t in self.tri_i2t.items()}
+        # tri_node_tags = [self.n_t2i[int(t)] for t in tri_node_tags[0]]
+        # tri_tags = np.squeeze(np.array(tri_tags))
+
+        # self.tri_i2t = {self.get_tri(*self.tris[:,i]): int(t) for i, t in enumerate(tri_tags)}
+        # self.tri_t2i = {t: i for i, t in self.tri_i2t.items()}
 
         self.tri_to_edge = np.ndarray((3, self.tris.shape[1]), dtype=int)
         self.tri_to_edge_sign = np.ndarray((3, self.tris.shape[1]), dtype=int)
@@ -690,7 +700,15 @@ class Mesh3D(Mesh):
             z0 = float(np.mean(nodes[2,:]))
             origin = (x0, y0, z0)
 
-        return SurfaceMesh(self, tri_ids, origin)
+        smesh = SurfaceMesh(self, tri_ids, origin)
+        
+        tet_ids = np.max(self.tri_to_tet[:,tri_ids], axis=0)
+        tet_centers = self.centers[:,tet_ids]
+        tri_centers = self.tri_centers[:,tri_ids]
+        align = tri_centers-tet_centers
+        
+        smesh.normals = np.sign(np.sum(align*smesh.normals, axis=0))*smesh.normals
+        return smesh
     
 class SurfaceMesh(Mesh):
 

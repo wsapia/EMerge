@@ -2,6 +2,7 @@ import emerge as em
 import numpy as np
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
+
 """ PATCH ANTENNA DEMO
 
 This design is modeled after this Comsol Demo: https://www.comsol.com/model/microstrip-patch-antenna-11742
@@ -36,7 +37,7 @@ f2 = 1.60e9             # stop frequency
 # --- Create simulation object -------------------------------------------
 model = em.Simulation('PatchAntenna')
 
-model.check_version("1.3.0") # Checks version compatibility.
+model.check_version("1.4.0") # Checks version compatibility.
 
 # --- Define geometry primitives -----------------------------------------
 # Substrate block centered at origin in XY, thickness in Z (negative down)
@@ -55,12 +56,12 @@ ground = em.geo.XYPlate(wsub, hsub, position=(-wsub/2, -hsub/2, -th)).set_materi
 
 # Define cutouts for inset feed: two rectangular plates to subtract
 cutout1 = em.geo.XYPlate(wstub, lstub,
-                         position=(-wline/2 - wstub, -Lpatch/2, 0))
+                        position=(-wline/2 - wstub, -Lpatch/2, 0))
 cutout2 = em.geo.XYPlate(wstub, lstub,
-                         position=( wline/2, -Lpatch/2, 0))
+                        position=( wline/2, -Lpatch/2, 0))
 # Feed line plate to add back between cutouts
 line = em.geo.XYPlate(wline, lstub,
-                       position=(-wline/2, -Lpatch/2, 0))
+                         position=(-wline/2, -Lpatch/2, 0))
 
 # Plate defining lumped port geometry (origin + width/height vectors)
 port = em.geo.Plate(
@@ -117,7 +118,7 @@ abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
 # --- Run frequency-domain solver ----------------------------------------
 model.view(plot_mesh=True, volume_mesh=False)
 
-data = model.mw.run_sweep()
+data = model.mw.run_sweep(True, 3, multi_processing=True)
 
 # --- Post-process S-parameters ------------------------------------------
 freqs = data.scalar.grid.freq

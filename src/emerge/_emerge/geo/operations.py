@@ -53,6 +53,8 @@ def add(main: T, tool: T,
     '''
     
     out_dim_tags, out_dim_tags_map = gmsh.model.occ.fuse(main.dimtags, tool.dimtags, removeObject=remove_object, removeTool=remove_tool)
+    
+    gmsh.model.occ.synchronize()
     if out_dim_tags[0][0] == 3:
         output = GeoVolume([dt[1] for dt in out_dim_tags])._take_tools(tool,main)
     elif out_dim_tags[0][0] == 2:
@@ -84,6 +86,8 @@ def remove(main: T, tool: T,
         A new object that is the difference of the main and tool objects.
     '''
     out_dim_tags, out_dim_tags_map = gmsh.model.occ.cut(main.dimtags, tool.dimtags, removeObject=remove_object, removeTool=remove_tool)
+    
+    gmsh.model.occ.synchronize()
     if out_dim_tags[0][0] == 3:
         output = GeoVolume([dt[1] for dt in out_dim_tags])._take_tools(tool,main)
     elif out_dim_tags[0][0] == 2:
@@ -116,6 +120,8 @@ def intersect(main: T, tool: T,
         A new object that is the difference of the main and tool objects.
     '''
     out_dim_tags, out_dim_tags_map = gmsh.model.occ.intersect(main.dimtags, tool.dimtags, removeObject=remove_object, removeTool=remove_tool)
+    
+    gmsh.model.occ.synchronize()
     if out_dim_tags[0][0] == 3:
         output = GeoVolume([dt[1] for dt in out_dim_tags])._take_tools(tool,main)
     elif out_dim_tags[0][0] == 2:
@@ -326,10 +332,12 @@ def unite(*objects: GeoObject) -> GeoObject:
     
     main._exists = False
     dts = []
-    for other in objects:
+    for other in rest:
         dts.extend(other.dimtags)
         other._exists = False
-    new_dimtags, mapping = gmsh.model.occ.fuse(dts, main.dimtags)
+    
+    new_dimtags, mapping = gmsh.model.occ.fuse(main.dimtags, dts)
+    gmsh.model.occ.synchronize()
     
     newname = 'Union[' + ','.join([obj.name for obj in objects]) + ']'
     new_obj = GeoObject.from_dimtags(new_dimtags)._take_tools(*objects)

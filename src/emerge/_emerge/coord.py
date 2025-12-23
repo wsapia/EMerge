@@ -112,8 +112,33 @@ class Line:
         zs = np.linspace(z1, z2, Npts)
         return Line(xs, ys, zs)
     
+    @staticmethod
+    def from_path(*points: tuple[float,float,float] | np.ndarray, ds: float) -> Line:
+        xpts = []
+        ypts = []
+        zpts = []
+        points = [np.array(p) for p in points]
+        xl = None
+        yl = None
+        zl = None
+        for p1, p2 in zip(points[:-1], points[1:]):
+            N = max(3,int(np.ceil(np.linalg.norm(p2-p1)/ds)))
+            *xs, xl = list(np.linspace(p1[0], p2[0], N))
+            *ys, yl = list(np.linspace(p1[1], p2[1], N))
+            *zs, zl = list(np.linspace(p1[2], p2[2], N))
+            xpts.extend(xs)
+            ypts.extend(ys)
+            zpts.extend(zs)
+        xpts.append(xl)
+        ypts.append(yl)
+        zpts.append(zl)
+        return Line(np.array(xpts), np.array(ypts), np.array(zpts))
+            
     def line_integral(self, evalfunc: Callable) -> complex:
         """Compute the line integral for a complex vector field function evalfunc."""
         Ex, Ey, Ez = evalfunc(*self.cpoint)
         EdotL = Ex*self.dx + Ey*self.dy + Ez*self.dz
         return gauss3_composite(self.l, EdotL)
+    
+    def _integrate(self, quantity: np.ndarray) -> complex:
+        return gauss3_composite(self.l, quantity)

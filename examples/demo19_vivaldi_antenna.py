@@ -15,7 +15,7 @@ For ARM MacOS users it is reccommended to install UMFPACK and run this using mul
 """
 
 m = em.SimulationBeta('Vivaldi')
-m.check_version("1.3.0")
+m.check_version("1.4.0")
 
 mm = 0.001          # Millimeter
 g = 0.3*mm          # Narrow exponential taper slot gap size
@@ -45,7 +45,6 @@ fy = lambda t: (g/2)*K**t + (W-g*K)/(2-2*K) *(1-K**t)
 # We will create the slots around the vivaldi by making slots that stretch across the entire
 # PCB and then removing the exponential taper region dilated by some 5 millimeters.
 # We could use a curve dilation but in this case we will derive the analytical expresion ourselves!
-# 
 
 # This A-coeff is just to make the equations more brief.
 A = (g/2) - (W-g*K)/(2-2*K)

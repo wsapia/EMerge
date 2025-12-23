@@ -16,14 +16,14 @@ Lrod = 70*mm
 
 # Create simulation container
 sim = em.Simulation('StepImport')
-sim.check_version("1.3.0")
+sim.check_version("1.4.0")
 
 # Set field resolution and frequency sweep
 sim.mw.set_resolution(0.25)
 sim.mw.set_frequency_range(8e9, 10e9, 21)
 
 # Define custom dielectric material for the rod. We choose something similar to 3D printing resin.
-RESIN = em.Material(er=2.5, color="#777777", opacity=1.0)
+RESIN = em.Material(er=2.5, tand=0.00, color="#777777", opacity=1.0)
 # Load STEP file.
 # STEPItems groups imported solids. Depending on the configuration of the STEP files, sometimes you have to provide unit=0.001 if the model
 # is made in millimeters for example. This does not always go automatically yet.
@@ -59,7 +59,7 @@ if False:
     sim.view(selections=air_cutout.all_faces())
       
 # Assign materials to metal flange and dielectric rod.
-flange.set_material(em.lib.COPPER)
+flange.set_material(em.lib.PEC)
 dielectric_rod.set_material(RESIN)
 
 # Cut port and rod clearance out of the air region and mark result as background material.
@@ -86,7 +86,7 @@ sim.view(selections=[abc], opacity=0.3)
 port = sim.mw.bc.RectangularWaveguide(portface, 1)
 
 # Apply absorbing boundary condition to outer air faces.
-abc_bc = sim.mw.bc.AbsorbingBoundary(abc)
+abc_bc = sim.mw.bc.AbsorbingBoundary(abc, abctype='D')
 
 # Run frequency-domain sweep.
 data = sim.mw.run_sweep()

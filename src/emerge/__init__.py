@@ -34,7 +34,7 @@ warnings.filterwarnings(
 
 import os
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 NTHREADS = "1"
 os.environ["EMERGE_STD_LOGLEVEL"] = os.getenv("EMERGE_STD_LOGLEVEL", default="INFO")
@@ -70,12 +70,13 @@ from ._emerge.coord import Line
 from ._emerge import geo
 from ._emerge.selection import Selection, FaceSelection, DomainSelection, EdgeSelection
 from ._emerge.geometry import select
-from ._emerge.mth.common_functions import norm, coax_rout, coax_rin
+from ._emerge.mth.common_functions import norm, coax_rout, coax_rin, dot, cross
 from ._emerge.periodic import RectCell, HexCell
 from ._emerge.mesher import Algorithm2D, Algorithm3D
 from . import lib
 from ._emerge.howto import _HowtoClass
 from ._emerge.emerge_update import update_emerge
+from .auxilliary.touchstone import TouchstoneData
 
 howto = _HowtoClass()
 

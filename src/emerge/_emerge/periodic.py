@@ -277,14 +277,16 @@ class HexCell(PeriodicCell):
     def area(self) -> float:
         """Area of the centrally symmetric hexagon defined by p1, p2, p3."""
         p1, p2, p3 = self.p1, self.p2, self.p3
-        return float(abs(
+        area = float(np.linalg.norm(abs(
             np.cross(p1, p2) +
             np.cross(p2, p3) -
             np.cross(p3, p1)
-        ))
+        )))
+        return area
+        
     def port_face(self, z: float):
-        xs, ys, zs = zip(self.p1, self.p2, self.p3)
-        poly = XYPolygon(xs, ys).geo(GCS.displace(0,0,zs[0]))
+        xs, ys, zs = zip(self.p1, self.p2, self.p3, -self.p1, -self.p2, -self.p3)
+        poly = XYPolygon(xs, ys).geo(GCS.displace(0,0,z))
         return poly
     
     def cell_data(self) -> Generator[tuple[Selection, Selection, np.ndarray], None, None]:

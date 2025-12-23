@@ -341,6 +341,9 @@ class Mesher:
         B = (1-gr)/gr
         from numba import njit, i8, f8
 
+        ns_list = [x for x in newsize]
+        A_list = [x/gr for x in newsize]
+        
         @njit(f8(i8,i8,f8,f8,f8,f8), nogil=True, fastmath=True, parallel=False)
         def func(dim, tag, x, y, z, lc):
             sizes = np.maximum(newsize, A - B * _qf*np.clip(np.sqrt((x-xs)**2 + (y-ys)**2 + (z-zs)**2) - newsize*0, a_min=0, a_max=None))

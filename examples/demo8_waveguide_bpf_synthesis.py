@@ -81,7 +81,7 @@ hphis = []
 
 with em.Simulation('IrisSim') as sim:
     
-    sim.check_version("1.3.0") # Checks version compatibility.
+    sim.check_version("1.4.0") # Checks version compatibility.
     
     for wgap in sim.parameter_sweep(True, wgap=wgaps):
         # Define two short waveguide sections separated by iris plate
@@ -94,7 +94,7 @@ with em.Simulation('IrisSim') as sim:
         sim.mw.set_resolution(0.10)
         sim.mesher.set_domain_size(iris, 2*mm)
         sim.generate_mesh()
-
+        
         # Port BCs on front/back faces for TE10 excitation
         sim.mw.bc.RectangularWaveguide(wg1.front, 1)
         sim.mw.bc.RectangularWaveguide(wg2.back, 2)

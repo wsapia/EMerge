@@ -28,7 +28,8 @@ from ...selection import FaceSelection
 from ...geometry import GeoSurface
 from ...mesh3d import Mesh3D
 from ...const import Z0, MU0, EPS0
-
+from ...coord import Line
+from ....lib import EISO, EOMNI
 EMField = Literal[
     "er", "ur", "freq", "k0",
     "_Spdata", "_Spmapping", "_field", "_basis",
@@ -247,52 +248,173 @@ class MWData:
 
     def setreport(self, report, **vars):
         self.sim.new(**vars)['report'] = report
-    
+
+
 @dataclass
-class FarFieldData:
-    E: np.ndarray
-    H: np.ndarray
-    theta: np.ndarray
-    phi: np.ndarray
-    ang: np.ndarray | None = None
+class FarFieldComponent:
+    F: np.ndarray
 
     @property
+    def x(self) -> np.ndarray:
+        return self.F[0,:]
+    
+    @property
+    def y(self) -> np.ndarray:
+        return self.F[1,:]
+    
+    @property
+    def z(self) -> np.ndarray:
+        return self.F[2,:]
+    
+    @property
+    def x(self) -> np.ndarray:
+        return self.F[0,:]
+    
+    @property
+    def y(self) -> np.ndarray:
+        return self.F[1,:]
+    
+    @property
+    def z(self) -> np.ndarray:
+        return self.F[2,:]
+    
+    @property
+    def theta(self) -> np.ndarray:
+        thx = np.cos(self.theta)*np.cos(self.phi)
+        thy = np.cos(self.theta)*np.sin(self.phi)
+        thz = -np.sin(self.theta)
+        return thx*self.F[0,:] + thy*self.F[1,:] + thz*self.F[2,:]
+    
+    @property
+    def phi(self) -> np.ndarray:
+        phx = -np.sin(self.phi)
+        phy = np.cos(self.phi)
+        phz = np.zeros_like(self.theta)
+        return phx*self.F[0,:] + phy*self.F[1,:] + phz*self.F[2,:]
+    
+    @property
+    def rhcp(self) -> np.ndarray:
+        return (self.theta + 1j*self.phi)/np.sqrt(2)
+    
+    @property
+    def lhcp(self) -> np.ndarray:
+        return (self.theta - 1j*self.phi)/np.sqrt(2)
+    
+    @property
+    def AR(self) -> np.ndarray:
+        R = np.abs(self.rhcp)
+        L = np.abs(self.lchp)
+        return (R+L)/(R-L)
+    
+    @property
+    def norm(self) -> np.ndarray:
+        return np.sqrt(np.abs(self.F[0,:])**2 + np.abs(self.F[1,:])**2 + np.abs(self.F[2,:])**2)
+    
+ETA0 = 376.730313668
+
+@dataclass
+class FarFieldData:
+    _E: np.ndarray
+    _H: np.ndarray
+    theta: np.ndarray
+    phi: np.ndarray
+    Ptot: float
+    ang: np.ndarray | None = None
+    
+    def total_radiated_power_integral(
+        self,
+        r: float = 1.0,
+        use: str = "EH",              # "EH" or "E"
+        degrees: bool | None = None,  # auto if None
+    ) -> float:
+        E = np.asarray(self._E)
+        H = np.asarray(self._H)
+        th = np.asarray(self.theta, float)
+        ph = np.asarray(self.phi, float)
+
+        if E.shape[:1] != (3,) or E.ndim != 3:
+            raise ValueError(f"_E must be (3,N,M), got {E.shape}")
+        if th.shape != E.shape[1:] or ph.shape != E.shape[1:]:
+            raise ValueError(f"theta/phi must be (N,M) matching _E[1:], got {th.shape}, {ph.shape}")
+        if use.upper() == "EH" and H.shape != E.shape:
+            raise ValueError(f"_H must match _E for use='EH', got {H.shape}")
+
+        if degrees is None:
+            degrees = (np.nanmax(th) > 2*np.pi + 0.5) or (np.nanmax(ph) > 2*np.pi + 0.5)
+        if degrees:
+            th = np.deg2rad(th)
+            ph = np.deg2rad(ph)
+
+        # rhat(θ,φ)
+        rhat = np.stack(
+            [np.sin(th) * np.cos(ph), np.sin(th) * np.sin(ph), np.cos(th)],
+            axis=0,
+        )  # (3,N,M)
+
+        # S_r
+        if use.upper() == "EH":
+            S = 0.5 * np.real(
+                np.cross(np.moveaxis(E, 0, -1), np.conj(np.moveaxis(H, 0, -1)))
+            )  # (N,M,3)
+            Sr = np.sum(S * np.moveaxis(rhat, 0, -1), axis=-1)  # (N,M)
+        elif use.upper() == "E":
+            Sr = (np.sum(np.abs(E) ** 2, axis=0) / (2.0 * ETA0)).real  # (N,M)
+        else:
+            raise ValueError("use must be 'EH' or 'E'")
+
+        # dΩ for general (θ(i,j), φ(i,j)) grid: dΩ = sinθ * |∂(θ,φ)/∂(i,j)| di dj
+        dth_di, dth_dj = np.gradient(th, edge_order=2)
+        dph_di, dph_dj = np.gradient(ph, edge_order=2)
+        J = dth_di * dph_dj - dth_dj * dph_di  # ∂(θ,φ)/∂(i,j)
+        dOmega = np.sin(th) * np.abs(J)
+
+        return float(r**2 * np.sum(Sr * dOmega))
+    
+    @property
+    def E(self) -> np.ndarray:
+        return FarFieldComponent(self._E)
+    
+    @property
+    def H(self) -> np.ndarray:
+        return FarFieldComponent(self._H)
+    
+    @property
     def Ex(self) -> np.ndarray:
-        return self.E[0,:]
+        return self._E[0,:]
     
     @property
     def Ey(self) -> np.ndarray:
-        return self.E[1,:]
+        return self._E[1,:]
     
     @property
     def Ez(self) -> np.ndarray:
-        return self.E[2,:]
+        return self._E[2,:]
     
     @property
     def Hx(self) -> np.ndarray:
-        return self.H[0,:]
+        return self._H[0,:]
     
     @property
     def Hy(self) -> np.ndarray:
-        return self.H[1,:]
+        return self._H[1,:]
     
     @property
     def Hz(self) -> np.ndarray:
-        return self.H[2,:]
+        return self._H[2,:]
     
     @property
     def Etheta(self) -> np.ndarray:
         thx = np.cos(self.theta)*np.cos(self.phi)
         thy = np.cos(self.theta)*np.sin(self.phi)
         thz = -np.sin(self.theta)
-        return thx*self.E[0,:] + thy*self.E[1,:] + thz*self.E[2,:]
+        return thx*self._E[0,:] + thy*self._E[1,:] + thz*self._E[2,:]
     
     @property
     def Ephi(self) -> np.ndarray:
         phx = -np.sin(self.phi)
         phy = np.cos(self.phi)
         phz = np.zeros_like(self.theta)
-        return phx*self.E[0,:] + phy*self.E[1,:] + phz*self.E[2,:]
+        return phx*self._E[0,:] + phy*self._E[1,:] + phz*self._E[2,:]
     
     @property
     def Erhcp(self) -> np.ndarray:
@@ -309,12 +431,26 @@ class FarFieldData:
         return (R+L)/(R-L)
     
     @property
+    def gain(self, kind: Literal['iso','omni'] = 'iso') -> FarFieldComponent:
+        if kind=='iso':
+            return FarFieldComponent(self._E/EISO)
+        else:
+            return FarFieldComponent(self._E/EOMNI)
+        
+    @property
+    def dir(self, kind: Literal['iso','omni'] = 'iso') -> FarFieldComponent:
+        if kind=='iso':
+            return FarFieldComponent(self._E/(EISO*(self.Ptot)**0.5))
+        else:
+            return FarFieldComponent(self._E/(EOMNI*(self.Ptot)**0.5))
+    
+    @property
     def normE(self) -> np.ndarray:
-        return np.sqrt(np.abs(self.E[0,:])**2 + np.abs(self.E[1,:])**2 + np.abs(self.E[2,:])**2)
+        return np.sqrt(np.abs(self._E[0,:])**2 + np.abs(self._E[1,:])**2 + np.abs(self._E[2,:])**2)
     
     @property
     def normH(self) -> np.ndarray:
-        return np.sqrt(np.abs(self.H[0,:])**2 + np.abs(self.H[1,:])**2 + np.abs(self.H[2,:])**2)
+        return np.sqrt(np.abs(self._H[0,:])**2 + np.abs(self._H[1,:])**2 + np.abs(self._H[2,:])**2)
     
     
     def surfplot(self, 
@@ -844,7 +980,7 @@ class MWField:
     def integrate(self, surface: FaceSelection, gqo: int = 4) -> EHField:
         from ...mth.optimized import generate_int_data_tri
         from ...mth.integrals import gaus_quad_tri
-        
+        logger.warning("Use int_surf instead!")
         DPTS = gaus_quad_tri(gqo)
         tris = self.mesh.get_triangles(surface.tags)
         
@@ -855,14 +991,71 @@ class MWField:
         field.aux['weights'] = W
 
         return field
+    
+    def int_surf(self, surface: FaceSelection, argument: Callable, gqo: int = 4) -> EHField:
+        """Performs a surface integral on the provided surface object. 
+
+        Args:
+            surface (FaceSelection): The surface to integrate
+            quantity (Callable): A function that takes an EH field as argument
+            gqo (int, optional): Gauss Quadrature order. Defaults to 4.
+
+        Returns:
+            EHField: _description_
+        """
+        from ...mth.optimized import generate_int_data_tri
+        from ...mth.integrals import gaus_quad_tri
         
-    def boundary(self,
-                 selection: FaceSelection) -> EHField:
+        DPTS = gaus_quad_tri(gqo)
+        tris = self.mesh.get_triangles(surface.tags)
+        
+        X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
+        
+        ehfield = self.interpolate(X, Y, Z, False)
+        
+        output = argument(ehfield)
+        
+        if len(output.shape)==2:
+            axis = 1
+        else:
+            axis = 0
+            
+        return np.sum(output*A*W, axis=axis)
+    
+    
+    def int_line(self, line: Line | list[tuple[float, float, float]], argument: Callable) -> EHField:
+        """Performs a line integral on the provided line with the an integral argument.
+
+        Args:
+            line (Line | list[tuple[float, float, float]]): _description_
+            argument (Callable): _description_
+
+        Returns:
+            EHField: _description_
+        """
+        if not isinstance(line, Line):
+            x,y,z = zip(*line)
+            line = Line(x, y, z)
+        
+        nint = self.interpolate(*line.cpoint)
+        dx = np.append(line.dxs, line.dxs[-1])
+        dy = np.append(line.dys, line.dys[-1])
+        dz = np.append(line.dzs, line.dzs[-1])
+        nint.dl = np.array([dx, dy, dz])
+        nint.dlx = dx
+        nint.dly = dy
+        nint.dlz = dz
+        
+        return line._integrate(argument(nint))
+        
+        
+    def boundary(self, selection: FaceSelection) -> EHField:
         """ Interpolate the field on the node coordinates of the surface."""
         nodes = self.mesh.nodes
-        x = nodes[0,:]
-        y = nodes[1,:]
-        z = nodes[2,:]
+        ids = self.mesh.get_nodes(selection.tags)
+        x = nodes[0,ids]
+        y = nodes[1,ids]
+        z = nodes[2,ids]
         field = self.interpolate(x, y, z, False)
         return field
     
@@ -1040,9 +1233,9 @@ class MWField:
         refdir = _parse_axis(ref_direction).np
         plane_normal_parsed = _parse_axis(plane_normal).np
         theta, phi = arc_on_plane(refdir, plane_normal_parsed, ang_range, Npoints)
-        E,H = self.farfield(theta, phi, faces, origin, syms = syms)
+        E,H,Ptot = self.farfield(theta, phi, faces, origin, syms = syms)
         angs = np.linspace(*ang_range, Npoints)*np.pi/180
-        return FarFieldData(E, H, theta, phi, ang=angs)
+        return FarFieldData(E, H, theta, phi, Ptot, ang=angs)
 
     def farfield_3d(self, 
                     faces: FaceSelection | GeoSurface,
@@ -1070,17 +1263,17 @@ class MWField:
 
         T,P = np.meshgrid(thetas, phis)
 
-        E, H = self.farfield(T.flatten(), P.flatten(), faces, origin, syms=syms)
+        E, H, Ptot = self.farfield(T.flatten(), P.flatten(), faces, origin, syms=syms)
         E = E.reshape((3, ) + T.shape)
         H = H.reshape((3, ) + T.shape)
         
-        return FarFieldData(E, H, T, P)
-
+        return FarFieldData(E, H, T, P, Ptot)
+        
     def farfield(self, theta: np.ndarray,
                  phi: np.ndarray,
                  faces: FaceSelection | GeoSurface,
                  origin: tuple[float, float, float] | None = None,
-                 syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> tuple[np.ndarray, np.ndarray]:
+                 syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> tuple[np.ndarray, np.ndarray, float]:
         """Compute the farfield at the provided theta/phi coordinates
 
         Args:
@@ -1091,19 +1284,42 @@ class MWField:
             syms (list[Literal['Ex','Ey','Ez','Hx','Hy','Hz']], optional): E and H-plane symmetry planes where Ex is E-symmetry in x=0. Defaults to []
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: The E and H field as (3,N) arrays
+            tuple[np.ndarray, np.ndarray, float]: The E and H field as (3,N) arrays and the total radiated power
         """
         if syms is None:
             syms = []
 
         from .sc import stratton_chu
+        
         surface = self.basis.mesh.boundary_surface(faces.tags, origin)
+        
         field = self.interpolate(*surface.exyz)
         
-        Eff,Hff = stratton_chu(field.E, field.H, surface, theta, phi, self.k0)
+        Eff, Hff, wns = stratton_chu(field.E, field.H, surface, theta, phi, self.k0)
+        
+        Ptot = np.sum(field.Smx*wns[0,:] + field.Smy*wns[1,:] + field.Smz*wns[2,:]).real
+        
+        # ### VERSION 2
+        # from ...mth.optimized import generate_int_data_tri
+        # from ...mth.integrals import gaus_quad_tri
+        
+        # DPTS = gaus_quad_tri(5)
+        # tris = self.mesh.get_triangles(faces.tags)
+        
+        # X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
+        
+        # ehfield = self.interpolate(X, Y, Z, False)
+        # X, Y, Z, W, A = [Q.reshape(shape) for Q in [X, Y, Z, W, A]]
+        # Sx = np.sum(W*A*ehfield.Smx.reshape(shape), axis=0)
+        # Sy = np.sum(W*A*ehfield.Smy.reshape(shape), axis=0)
+        # Sz = np.sum(W*A*ehfield.Smz.reshape(shape), axis=0)
+        
+        
+        # Ptot = np.sum(Sx*surface.normals[0,:] + Sy*surface.normals[1,:] + Sz*surface.normals[2,:]).real
+        # print('PTOT2:', Ptot)
         
         if len(syms)==0:
-            return Eff, Hff
+            return Eff, Hff, Ptot
 
         if len(syms)==1:
             perms = ((syms[0], '##', '##'),)
@@ -1124,11 +1340,11 @@ class MWField:
             surf.flip(s1[1])
             surf.flip(s2[1])
             surf.flip(s3[1])
-            E2, H2 = stratton_chu(Ef, Hf, surf, theta, phi, self.k0)
+            E2, H2, wns = stratton_chu(Ef, Hf, surf, theta, phi, self.k0)
             Eff = Eff + E2
             Hff = Hff + H2
         
-        return Eff, Hff
+        return Eff, Hff, Ptot
 
     def optycal_surface(self, faces: FaceSelection | GeoSurface | None = None) -> tuple:
         """Export this models exterior to an Optical acceptable dataset
@@ -1169,7 +1385,7 @@ class MWField:
         """
         freq = self.freq
         def function(theta: np.ndarray, phi: np.ndarray, k0: float):
-            E, H = self.farfield(theta, phi, faces, origin, syms)
+            E, H, _ = self.farfield(theta, phi, faces, origin, syms)
             return E[0,:], E[1,:], E[2,:], H[0,:], H[1,:], H[2,:]
     
         return dict(freq=freq, ff_function=function)

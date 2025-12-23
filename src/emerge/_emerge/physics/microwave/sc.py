@@ -167,4 +167,4 @@ def stratton_chu(Ein, Hin, mesh: SurfaceMesh, theta: np.ndarray, phi: np.ndarray
         tpout.astype(np.float64),
         np.float64(k0),
     )
-    return Eout.astype(np.complex128), Hout.astype(np.complex128)
+    return Eout.astype(np.complex128), Hout.astype(np.complex128), wns

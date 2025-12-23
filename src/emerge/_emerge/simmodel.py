@@ -188,6 +188,18 @@ class Simulation:
             signal.signal(signum, signal.SIG_DFL)
             os.kill(os.getpid(), signum)
 
+    def _autosave(self):
+        """Called by atexit as an emergency matter.
+        """
+        if not self.settings.auto_save:
+            return
+        
+        if not self.settings.save_after_sim:
+            if not self.mw._completed:
+                return
+            
+        self._exit_gmsh()
+        
     def _initialize_simulation(self):
         """Initializes the Simulation data and GMSH API with proper shutdown routines.
         """
@@ -202,7 +214,7 @@ class Simulation:
             self._install_signal_handlers()
 
             # Restier the Exit GMSH function on proper program abortion
-            register(self._exit_gmsh)
+            register(self._autosave)
         else:
             gmsh.finalize()
             gmsh.initialize()
@@ -221,6 +233,7 @@ class Simulation:
         # If the simulation object state is still active (GMSH is running)
         if not self.__active:
             return
+        
         logger.debug('Exiting program')
         
         if DEBUG_COLLECTOR.any_warnings:
@@ -507,6 +520,8 @@ class Simulation:
             
             if face_labels and geo.dim==3:
                 for face_name in geo._face_pointers.keys():
+                    if geo.face(face_name).invalid:
+                        continue
                     self.display.add_object(geo.face(face_name), color='yellow', opacity=0.1, label=face_name)
         if selections:
             [self.display.add_object(sel, color='red', opacity=0.6, label=sel.name) for sel in selections]
@@ -869,7 +884,7 @@ class SimulationBeta(Simulation):
                                  refinement_ratio: float = 0.6,
                                  growth_rate: float = 1.6,
                                  minimum_refinement_percentage: float = 20.0, 
-                                 error_field_inclusion_percentage: float = 55.0,
+                                 error_field_inclusion_percentage: float = 50.0,
                                  minimum_steps: int = 1,
                                  frequency: float | list[float] = None,
                                  show_mesh: bool = False) -> SimulationDataset:
@@ -930,13 +945,11 @@ class SimulationBeta(Simulation):
             Smats = []
             
             for sf in sim_freqs:
-                data, solve_ids = self.mw._run_adaptive_mesh(step, max_freq)
+                data, solve_ids = self.mw._run_adaptive_mesh(step, sf)
                 datas.append(data)
                 fields.append(data.field[-1])
                 Smats.append(data.scalar[-1].Sp)
                 
-            #field = data.field[-1]
-            #Smat_new = data.scalar[-1].Sp
             S_matrices.append(Smats)
             
             if step > minimum_steps:
@@ -955,7 +968,7 @@ class SimulationBeta(Simulation):
                     
                 logger.info(f'Pass {step}: Convergence = {max_complx:.3f}, Mag = {max_mag:.3f}, Phase = {max_phase:.1f} deg')
                 
-                if conv_complex <= convergence and max_phase < phase_convergence and max_mag < magnitude_convergence:
+                if max_complx <= convergence and max_phase < phase_convergence and max_mag < magnitude_convergence:
                     logger.info(f'Pass {step}: Mesh refinement passed!')
                     passed += 1
                 else:
@@ -1021,6 +1034,13 @@ class SimulationBeta(Simulation):
                 Ratios.append(refinement_ratio)
                 Percentages.append(percentage)
                 
+                if len(Percentages) >= 2:
+                    if abs(Percentages[-2]-Percentages[-1]) == 0.0:
+                        logger.warning(f'No refinement realized, decreasing refinment ratio.')
+                        refinement_ratio = refinement_ratio * 0.5
+                        self.mesher.set_ratio(refinement_ratio)
+                        continue
+                
                 if percentage < minimum_refinement_percentage or percentage > (minimum_refinement_percentage*2):
                     
                     refinement_ratio = self.compute_ratio(np_percentage, Ratios, Percentages, minimum_refinement_percentage)
@@ -1039,7 +1059,7 @@ class SimulationBeta(Simulation):
                 self.view(plot_mesh=True, volume_mesh=True)
             
             if last_n_tets > max_tets:
-                logger.warning(f'Aborting refinement because the number of tets exceeds the maximum: {last_n_tets>max_tets}')
+                logger.warning(f'Aborting refinement because the number of tets exceeds the maximum: {last_n_tets}>{max_tets}')
                 break
         if passed < min_refined_passes:
             logger.warning('Adaptive mesh refinement did not converge!')

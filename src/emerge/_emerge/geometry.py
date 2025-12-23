@@ -448,7 +448,7 @@ class GeoObject:
         new_obj._tools = {key: {key2: value2.copy() for key2, value2 in value.items()} for key,value in self._tools.items()}
         
         new_obj._aux_data = self._aux_data.copy()
-        new_obj._priority = self._priority
+        new_obj._base_priority = self._base_priority
         new_obj._exists = self._exists
         return new_obj
 

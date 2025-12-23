@@ -426,6 +426,7 @@ class XYPolygon:
         self._cleanup()
         ptags, lines, wiretag = self._make_wire(cs)
         surftag = gmsh.model.occ.add_plane_surface([wiretag,])
+        gmsh.model.occ.remove([(1,wiretag),]+[(1,t) for t in lines], recursive=True)
         poly = GeoPolygon([surftag,], name=name)
         poly.points = ptags
         poly.lines = lines

@@ -756,6 +756,7 @@ def plot_ff_polar(
     zero_location: str = 'N',
     clockwise: bool = False,
     rlabel_angle: float = 45,
+    rlim: tuple[float, float] | None = None,
     title: Optional[str] = None
 ) -> None:
     """
@@ -803,12 +804,22 @@ def plot_ff_polar(
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
     ax.set_theta_zero_location(zero_location) # type: ignore
     ax.set_theta_direction(-1 if clockwise else 1) # type: ignore
+    
     ax.set_rlabel_position(rlabel_angle) # type: ignore
     ymin = min([min(E) for E in E_list])
     ymax = max([max(E) for E in E_list])
     yrange = ymax-ymin
 
-    ax.set_ylim(ymin-0.05*yrange, ymax+0.05*yrange)
+    ylim_min = ymin-0.05*yrange
+    ylim_max = ymax+0.05*yrange
+    if rlim is not None:
+        y1, y2 = rlim
+        if y1 is not None:
+            ylim_min = y1
+        if y2 is not None:
+            ylim_max = y2
+        
+    ax.set_ylim(ylim_min, ylim_max)
     for i, Ei in enumerate(E_list):
         
         ax.plot(

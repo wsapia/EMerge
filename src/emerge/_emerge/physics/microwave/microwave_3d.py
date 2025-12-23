@@ -135,9 +135,9 @@ class Microwave3D:
         self._bc_initialized: bool = False
         self._simstart: float = 0.0
         self._simend: float = 0.0
-        
         self._container: dict[str, Any] = dict()
-
+        self._completed: bool = False
+        
     @property
     def _params(self) -> dict[str, float]:
         return self._state.params
@@ -691,7 +691,7 @@ class Microwave3D:
         Returns:
             MWSimData: The dataset.
         """
-        
+        self._completed = False
         self._simstart = time.time()
         if self.bc._initialized is False:
             raise SimulationError('Cannot run a modal analysis because no boundary conditions have been assigned.')
@@ -872,6 +872,7 @@ class Microwave3D:
         self.solveroutine.reset()
         ### Compute S-parameters and return
         self._post_process(results, matset)
+        self._completed = True
         return self.data
     
     def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
@@ -898,10 +899,10 @@ class Microwave3D:
             priolist = [vol._priority for vol in volumelist]
             maxprio = max(priolist)
             if priolist.count(maxprio) > 1:
-                volumes = [vol for vol in volumelist if vol._priority==maxprio]
-                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
-                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {volumes}. Consider setting priorities to decide which volume is more important.')
-                
+                vols = [vol for vol in volumelist if vol._priority==maxprio]
+                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+            
         xs = self.mesh.centers[0,:]
         ys = self.mesh.centers[1,:]
         zs = self.mesh.centers[2,:]
@@ -916,6 +917,9 @@ class Microwave3D:
                 tet_ids = self.mesh.get_tetrahedra(dimtag[1])
                 
                 matassign[tet_ids] = volume.material._hash_key
+        
+        if np.any(matassign==-1):
+            raise SimulationError(f'Tetrahedra detected with unassigned materials: {np.argwhere(matassign==-1)}')
         
         for mat in materials:
             ids = np.argwhere(matassign==mat._hash_key).flatten()
@@ -984,14 +988,14 @@ class Microwave3D:
             return job
         
         
-        matset: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []     
+        #matset: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []     
 
         self._compute_modes(frequency)
 
         logger.debug(f'Simulation frequency = {frequency/1e9:.3f} GHz') 
         
-        if automatic_modal_analysis:
-            self._compute_modes(frequency)
+        #if automatic_modal_analysis:
+        #    self._compute_modes(frequency)
             
         job, mats = self.assembler.assemble_freq_matrix(self.basis, materials, 
                                                 self.bc.boundary_conditions, 
@@ -1180,14 +1184,13 @@ class Microwave3D:
                 # Compute the S-parameters
                 # Define the field interpolation function
                 fieldf = self.basis.interpolate_Ef(solution, tetids=port_tets)
-                Pout = 0.0 + 0j
 
                 # Active port power
                 tris = mesh.get_triangles(active_port.tags)
                 tri_vertices = mesh.tris[:,tris]
-                pfield, pmode = self._compute_s_data(active_port, fieldf, tri_vertices, k0, ertri[:,:,tris], urtri[:,:,tris])
-                logger.debug(f'[{active_port.port_number}] Active port amplitude = {np.abs(pfield):.3f} (Excitation = {np.abs(pmode):.2f})')
-                Pout = pmode
+                EdotF_act, EdotE_act = self._compute_s_data(active_port, fieldf, tri_vertices, k0, ertri[:,:,tris], urtri[:,:,tris])
+                logger.debug(f'[{active_port.port_number}] Active port amplitude = {np.abs(EdotF_act):.3f} (Excitation = {np.abs(EdotE_act):.2f})')
+                Amp_act = np.sqrt(active_port.power)
                 
                 #Passive ports
                 for bc in all_ports:
@@ -1195,13 +1198,14 @@ class Microwave3D:
                     fieldf = self.basis.interpolate_Ef(solution, tetids=port_tets)
                     tris = mesh.get_triangles(bc.tags)
                     tri_vertices = mesh.tris[:,tris]
-                    pfield, pmode = self._compute_s_data(bc, fieldf,tri_vertices, k0, ertri[:,:,tris], urtri[:,:,tris])
-                    logger.debug(f'[{bc.port_number}] Passive amplitude = {np.abs(pfield):.3f}')
-                    scalardata.write_S(bc.port_number, active_port.port_number, pfield/Pout)
-                    if abs(pfield/Pout) > 1.0:
-                        logger.warning(f'S-parameter ({bc.port_number},{active_port.port_number}) > 1.0 detected: {np.abs(pfield/Pout)}')
+                    EdotF_pas, EdotE_pas = self._compute_s_data(bc, fieldf,tri_vertices, k0, ertri[:,:,tris], urtri[:,:,tris])
+                    Amp_pas = EdotF_pas/EdotE_pas
+                    logger.debug(f'[{bc.port_number}] Passive amplitude = {np.abs(EdotF_pas):.3f}')
+                    scalardata.write_S(bc.port_number, active_port.port_number, Amp_pas/Amp_act)
+                    if abs(Amp_pas/Amp_act) > 1.0:
+                        logger.warning(f'S-parameter ({bc.port_number},{active_port.port_number}) > 1.0 detected: {np.abs(Amp_pas/Amp_act)}')
                         not_conserved = True
-                        conserve_margin = abs(pfield/Pout) - 1.0
+                        conserve_margin = abs(Amp_pas/Amp_act) - 1.0
                 active_port.active=False
             
             
@@ -1272,7 +1276,7 @@ class Microwave3D:
                 a = bc.voltage
                 b = (V-bc.voltage)
             else:
-                a = 0
+                a = bc.voltage
                 b = V
             
             a_sig = a*csqrt(1/(2*bc.Z0))
@@ -1287,8 +1291,8 @@ class Microwave3D:
             elif bc.modetype(k0) == 'TM':
                 const = 1/((erp[0,0,:] + erp[1,1,:] + erp[2,2,:])/3)
             const = np.squeeze(const)
-            field_p = sparam_field_power(self.mesh.nodes, tri_vertices, bc, k0, fieldfunction, const, 5)
-            mode_p = sparam_mode_power(self.mesh.nodes, tri_vertices, bc, k0, const, 5)
+            field_p = sparam_field_power(self.mesh.nodes, tri_vertices, bc, k0, fieldfunction, const, 4)
+            mode_p = sparam_mode_power(self.mesh.nodes, tri_vertices, bc, k0, const, 4)
             return field_p, mode_p
 
 
@@ -1301,3 +1305,296 @@ class Microwave3D:
         """
         logger.warning('This function is depricated. Please use run_sweep() instead')
         return self.run_sweep(*args, **kwargs)
+    
+    
+class MW3D:
+    """The New Electrodynamics time harmonic physics class.
+
+    This class contains all physics dependent features to perform EM simuation in the time-harmonic
+    formulation.
+
+    """
+    def __init__(self, settings: Settings, order: int = 2):
+        
+        self._settings: Settings = settings
+        self.order: int = order
+        self.bc: MWBoundaryConditionSet = MWBoundaryConditionSet(None)
+        self.basis: Nedelec2 | None = None
+
+        ## Parameters
+        self.resolution: float = 0.33
+        
+        ## States
+        self._bc_initialized: bool = False
+        self._simstart: float = 0.0
+        self._simend: float = 0.0
+        self._container: dict[str, Any] = dict()
+        self._completed: bool = False
+        
+    @property
+    def _params(self) -> dict[str, float]:
+        return self._state.params
+    
+    @property
+    def mesh(self) -> Mesh3D:
+        return self._state.mesh
+    
+    @property
+    def data(self) -> MWData:
+        return self._state.data.mw
+    
+    def reset(self, _reset_bc: bool = True):
+        if _reset_bc:
+            self.bc = MWBoundaryConditionSet(None)
+        else:
+            for bc in self.bc.oftype(ModalPort):
+                bc.reset()
+            
+        self.basis: FEMBasis = None
+        self.solveroutine.reset()
+        self.assembler.cached_matrices = None
+
+    @property
+    def nports(self) -> int:
+        """The number of ports in the physics.
+
+        Returns:
+            int: The number of ports
+        """
+        return self.bc.count(PortBC)
+    
+    def ports(self) -> list[PortBC]:
+        """A list of all port boundary conditions.
+
+        Returns:
+            list[PortBC]: A list of all port boundary conditions
+        """
+        return sorted(self.bc.oftype(PortBC), key=lambda x: x.number) # type: ignore
+    
+    
+    def _initialize_bcs(self, surfaces: list[GeoSurface]) -> None:
+        """Initializes the boundary conditions to set PEC as all exterior boundaries.
+        """
+        logger.debug('Initializing boundary conditions.')
+
+        tags = self.mesher.domain_boundary_face_tags
+        
+        # Assigning surface impedance boundary condition
+        if self._settings.mw_2dbc:
+            for surf in surfaces:
+                if surf.material.cond.scalar(1e9) > self._settings.mw_2dbc_peclim:
+                    logger.debug(f'Assinging PEC to {surf}')
+                    self.bc.PEC(surf)
+                elif surf.material.cond.scalar(1e9) > self._settings.mw_2dbc_lim:
+                    self.bc.SurfaceImpedance(surf, surf.material)
+                
+        
+        tags = [tag for tag in tags if tag not in self.bc.assigned(2)]
+        
+        self.bc.PEC(FaceSelection(tags))
+        
+        logger.info(f'Adding PEC boundary condition with tags {tags}.')
+        if self.mesher.periodic_cell is not None:
+            self.mesher.periodic_cell.generate_bcs()
+            for bc in self.mesher.periodic_cell.bcs:
+                self.bc.assign(bc)
+
+    def get_discretizer(self) -> Callable:
+        """Returns a discretizer function that defines the maximum mesh size.
+
+        Returns:
+            Callable: The discretizer function
+        """
+        def disc(material: Material):
+            return 299792458/(max(self.frequencies) * np.real(material.neff(max(self.frequencies))))
+        return disc
+
+    def _initialize_bc_data(self):
+        ''' Initializes auxilliary required boundary condition information before running simulations.
+        '''
+        logger.debug('Initializing boundary conditions')
+        self.bc.cleanup()
+        for port in self.bc.oftype(LumpedPort):
+            self.define_lumped_port_integration_points(port)
+    
+    def _check_physics(self) -> None:
+        """ Executes a physics check before a simulation can be run."""
+        if not self.bc._is_excited():
+            raise SimulationError('The simulation has no boundary conditions that insert energy. Make sure to include at least one Port into your simulation.')
+    
+    def define_lumped_port_integration_points(self, port: LumpedPort) -> None:
+        """Sets the integration points on Lumped Port objects for voltage integration
+
+        Args:
+            port (LumpedPort): The LumpedPort object
+
+        Raises:
+            SimulationError: An error if there are no nodes associated with the port.
+        """
+        if len(port.vintline) > 0:
+            return
+        logger.debug(' - Finding Lumped Port integration points')
+        field_axis = port.Vdirection.np
+
+        points = self.mesh.get_nodes(port.tags)
+
+        if points.size==0:
+            raise SimulationError(f'The lumped port {port} has no nodes associated with it')
+        
+        xs = self.mesh.nodes[0,points]
+        ys = self.mesh.nodes[1,points]
+        zs = self.mesh.nodes[2,points]
+
+        dotprod = xs*field_axis[0] + ys*field_axis[1] + zs*field_axis[2]
+
+        start_id = np.argwhere(dotprod == np.min(dotprod)).flatten()
+        
+        xs = xs[start_id]
+        ys = ys[start_id]
+        zs = zs[start_id]
+        
+
+        for x,y,z in zip(xs, ys, zs):
+            start = np.array([x,y,z])
+            end = start + port.Vdirection.np*port.height
+            port.vintline.append(Line.from_points(start, end, 21))
+            logger.trace(f' - Port[{port.port_number}] integration line {start} -> {end}.')
+        
+        port.v_integration = True
+
+    def _find_tem_conductors(self, port: ModalPort, sigtri: np.ndarray) -> tuple[list[int], list[int]]:
+        ''' Returns two lists of global node indices corresponding to the TEM port conductors.
+        
+        This method is invoked during modal analysis with TEM modes. It looks at all edges
+        exterior to the boundary face triangulation and finds two small subsets of nodes that
+        lie on different exterior boundaries of the boundary face.
+
+        Args:
+            port (ModalPort): The modal port object.
+            
+        Returns:
+            list[int]: A list of node integers of island 1.
+            list[int]: A list of node integers of island 2.
+        '''
+        if self.basis is None:
+            raise ValueError('The field basis is not yet defined.')
+
+        logger.debug(' - Finding PEC TEM conductors')
+        mesh = self.mesh
+        
+        # Find all BC conductors
+        pecs: list[PEC] = self.bc.get_conductors() # type: ignore
+
+        # Process all PEC Boundary Conditions
+        pec_edges = []
+        for pec in pecs:
+            face_tags = pec.tags
+            tri_ids = mesh.get_triangles(face_tags)
+            edge_ids = list(mesh.tri_to_edge[:,tri_ids].flatten())
+            pec_edges.extend(edge_ids)
+        
+        # Process conductivity
+        for itri in mesh.get_triangles(port.tags):
+            if sigtri[itri] > 1e6:
+                edge_ids = list(mesh.tri_to_edge[:,itri].flatten())
+                pec_edges.extend(edge_ids)
+
+        # All PEC edges
+        pec_edges = list(set(pec_edges))
+        
+        # Port mesh data
+        tri_ids = mesh.get_triangles(port.tags)
+        edge_ids = list(mesh.tri_to_edge[:,tri_ids].flatten())
+        
+        port_pec_edges = np.array([i for i in pec_edges if i in set(edge_ids)])
+        
+        pec_islands = mesh.find_edge_groups(port_pec_edges)
+
+        
+        logger.debug(f' - Found {len(pec_islands)} PEC islands.')
+
+        if len(pec_islands) != 2:
+            pec_island_tags = {i: self.mesh._get_dimtags(edges=pec_edge_group) for i,pec_edge_group in enumerate(pec_islands)}
+            plus_term = None
+            min_term = None
+            
+            for i, dimtags in pec_island_tags.items():
+                if not set(dimtags).isdisjoint(port.plus_terminal):
+                    plus_term = i
+                
+                if not set(dimtags).isdisjoint(port.minus_terminal):
+                    min_term = i
+            
+            if plus_term is None or min_term is None:
+                logger.error(f' - Found {len(pec_islands)} PEC islands without a terminal definition. Please use .set_terminals() to define which conductors are which polarity, or define the integration line manually.') 
+                return None, None  
+            logger.debug(f'Positive island = {pec_island_tags[plus_term]}')
+            logger.debug(f'Negative island = {pec_island_tags[min_term]}')
+            pec_islands = [pec_islands[plus_term], pec_islands[min_term]]
+        
+        groups = []
+        for island in pec_islands:
+            group = set()
+            for edge in island:
+                group.add(mesh.edges[0,edge])
+                group.add(mesh.edges[1,edge])
+            groups.append(sorted(list(group)))
+        
+        group1 = groups[0]
+        group2 = groups[1]
+
+        return group1, group2
+    
+    
+    def _get_material_assignment(self, volumes: list[GeoVolume]) -> list[Material]:
+        '''Retrieve the material properties of the geometry'''
+        
+        # Reset index assingments
+        for vol in volumes:
+            vol.material.reset()
+        
+        # collect all materials
+        materials = []
+        assignment_dict: dict[int, list[GeoVolume]] = defaultdict(list)
+        i = 0
+        for vol in volumes:
+            for tag in vol.tags:
+                assignment_dict[tag].append(vol)
+            if vol.material not in materials:
+                materials.append(vol.material)
+                vol.material._hash_key = i
+                i += 1
+        
+        # Check competing priorities!
+        for domaintag, volumelist in assignment_dict.items():
+            priolist = [vol._priority for vol in volumelist]
+            maxprio = max(priolist)
+            if priolist.count(maxprio) > 1:
+                vols = [vol for vol in volumelist if vol._priority==maxprio]
+                logger.warning(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+                DEBUG_COLLECTOR.add_report(f'Domain with tag {domaintag} has multiple geometries imposing a material to them: {vols}. Consider setting priorities to decide which volume is more important.')
+            
+        xs = self.mesh.centers[0,:]
+        ys = self.mesh.centers[1,:]
+        zs = self.mesh.centers[2,:]
+        
+        matassign = -1*np.ones((self.mesh.n_tets,), dtype=np.int64)
+        
+        
+        for volume in sorted(volumes, key=lambda x: x._priority):
+        
+            for dimtag in volume.dimtags:
+                
+                tet_ids = self.mesh.get_tetrahedra(dimtag[1])
+                
+                matassign[tet_ids] = volume.material._hash_key
+        
+        if np.any(matassign==-1):
+            raise SimulationError(f'Tetrahedra detected with unassigned materials: {np.argwhere(matassign==-1)}')
+        for mat in materials:
+            ids = np.argwhere(matassign==mat._hash_key).flatten()
+            mat.initialize(xs[ids], ys[ids], zs[ids], ids)
+                    
+        
+        return materials
+    
