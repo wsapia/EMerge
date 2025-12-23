@@ -1528,7 +1528,7 @@ class PCB:
         
         tag_wire = gmsh.model.occ.addWire(ltags)
         planetag = gmsh.model.occ.addPlaneSurface([tag_wire,])
-        poly = GeoPolygon([planetag,], name='name')
+        poly = GeoPolygon([planetag,], name=name)
         poly._aux_data['width'] = stripline.width*self.unit
         poly._aux_data['height'] = height*self.unit
         poly._aux_data['vdir'] = self.cs.zax
@@ -1685,7 +1685,7 @@ class PCB:
             xys2 = [(xm,ym),]
             
             for x,y in xys[1:]:
-                if ((x-xm)**2 + (y-ym)**2)>1e-6:
+                if np.sqrt((x-xm)**2 + (y-ym)**2)>1e-6:
                     xys2.append((x,y))
                     xm, ym = x, y
                     allx.append(x)
