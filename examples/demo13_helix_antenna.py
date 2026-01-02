@@ -25,7 +25,7 @@ porth = 2*mm                    # vertical height of the feed extrusion
 
 # --- Simulation object -------------------------------------------------------
 model = em.Simulation('HelixAntennas')
-model.check_version("1.4.0") # Checks version compatibility.
+model.check_version("2.0.0") # Checks version compatibility.
 
 dfeed = 3*mm                    # straight feed length before the helix starts
 
@@ -105,7 +105,7 @@ model.display.add_object(helix)
 model.display.add_object(airbox)
 
 # Compute full 3D far-field (at the same frequency) and display |Erhcp|
-model.display.add_surf(*data.field.find(freq=3.1e9).farfield_3d(abc_sel).surfplot('Elhcp','abs',rmax=L/2, isotropic=True, offset=(0,0,L)))
+model.display.add_field(data.field.find(freq=3.1e9).farfield_3d(abc_sel).surfplot('Elhcp','abs',rmax=L/2, isotropic=True, offset=(0,0,L)))
 
 # Show interactive 3D scene
 model.display.show()

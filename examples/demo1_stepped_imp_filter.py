@@ -30,7 +30,7 @@ pcbmat = em.Material(er=er, color="#217627", opacity=0.2)
 # We start by creating our simulation object.
 
 m = em.Simulation('SteppedImpedanceFilter')
-m.check_version("1.4.0") # Checks version compatibility.
+m.check_version("2.0.0") # Checks version compatibility.
 # To accomodate PCB routing we make use of the PCBLayouter class. To use it we need to 
 # supply it with a thickness, the desired air-box height, the units at which we supply
 # the dimensions and the PCB material.
@@ -87,6 +87,7 @@ m.mesher.set_face_size(p2, 5*mm)
 # Finally we generate our mesh and view it
 m.generate_mesh()
 m.view()
+
 # We can now define the modal ports for the in and outputs and set the conductor to PEC.
 port1 = m.mw.bc.ModalPort(p1, 1, modetype='TEM')
 port2 = m.mw.bc.ModalPort(p2, 2, modetype='TEM')
@@ -126,8 +127,7 @@ plot_sp(f, [S11, S21], labels=['S11','S21'], dblim=[-40,6], logx=True)
 field = sol.field[0]
 m.display.add_object(pcb, opacity=0.1)
 m.display.add_object(polies, opacity=0.5)
-m.display.animate().add_surf(*field.cutplane(1*mm, z=-0.75*th*mil).scalar('Ez','complex'), symmetrize=True)
+m.display.animate().add_field(field.cutplane(1*mm, z=-0.75*th*mil).scalar('Ez','complex'), symmetrize=True)
 m.display.add_portmode(port1, k0=field.k0)
 m.display.add_portmode(port2, k0=field.k0)
-m.display.save_vtk('MyFiles')
 m.display.show()

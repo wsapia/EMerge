@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 import gmsh # type: ignore
-from .material import Material, AIR
+from emsutil import Material
+from emsutil.lib import AIR
 from .selection import FaceSelection, DomainSelection, EdgeSelection, PointSelection, Selection, SelectionError
 from loguru import logger
 from typing import Literal, Any, Iterable, Callable

@@ -14,7 +14,7 @@ mm = 0.001    # Define a millimeter
 th = 1.0      # mm
 
 model = em.Simulation('StriplineWithVias')
-model.check_version("1.4.0") # Checks version compatibility.
+model.check_version("2.0.0") # Checks version compatibility.
 
 # As usual we start by creating our layouter
 ly = em.geo.PCB(th, mm, em.GCS, layers=3, material=em.lib.DIEL_RO4350B, trace_material=em.lib.PEC)
@@ -92,6 +92,6 @@ model.display.add_portmode(p1, data.field[3].k0)
 # You can use the cutplane method of the BaseDataset class
 # This is equivalent to the interpolate method except it automatically generates
 # the point cloud based on a plane x,y or z coordinate.
-model.display.add_quiver(*data.field[3].cutplane(ds=0.001, z=-0.00025).vector('E'))
-model.display.animate().add_surf(*data.field[3].cutplane(ds=0.001, z=-0.00075).scalar('Ez','complex'), symmetrize=True)
+model.display.add_field(data.field[3].cutplane(ds=0.001, z=-0.00025).vector('E')) # Plotting full E-fields automatically registers as vector plots
+model.display.animate().add_field(data.field[3].cutplane(ds=0.001, z=-0.00075).scalar('Ez','complex'), symmetrize=True)
 model.display.show()

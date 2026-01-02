@@ -401,9 +401,10 @@ wheels = [
 
 [[package]]
 name = "emerge"
-version = "1.3.4"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "emsutil" },
     { name = "gmsh" },
     { name = "joblib" },
     { name = "loguru" },
@@ -439,6 +440,7 @@ umfpack = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ezdxf" },
     { name = "pipdeptree" },
     { name = "pygerber" },
     { name = "pytest" },
@@ -450,6 +452,7 @@ dev = [
 requires-dist = [
     { name = "cupy-cuda12x", marker = "extra == 'cudss'" },
     { name = "cupy-cuda12x", marker = "extra == 'cudss12'" },
+    { name = "emsutil", editable = "../emsutil" },
     { name = "ezdxf", marker = "extra == 'dxf'" },
     { name = "gmsh", specifier = ">=4.13.0,<4.14.0" },
     { name = "joblib", specifier = ">=1.5.1" },
@@ -472,11 +475,34 @@ provides-extras = ["umfpack", "cudss", "cudss12", "dxf", "gerber"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ezdxf", specifier = ">=1.4.3" },
     { name = "pipdeptree", specifier = ">=2.28.0" },
     { name = "pygerber" },
     { name = "pytest", specifier = ">=8.4.1" },
     { name = "scikit-umfpack", specifier = ">=0.4.2" },
     { name = "threadpoolctl", specifier = ">=3.6.0" },
+]
+
+[[package]]
+name = "emsutil"
+version = "0.2.0"
+source = { editable = "../emsutil" }
+dependencies = [
+    { name = "loguru" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pyvista" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "matplotlib", specifier = ">=3.8.0" },
+    { name = "numpy", specifier = ">=1.24,<2.3" },
+    { name = "pyvista", specifier = ">=0.46.4" },
+    { name = "scipy", specifier = ">=1.14.0" },
 ]
 
 [[package]]

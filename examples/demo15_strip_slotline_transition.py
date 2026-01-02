@@ -7,7 +7,6 @@
 
 
 import emerge as em
-import numpy as np
 from emerge.plot import plot_sp
 
 
@@ -35,8 +34,8 @@ Rcirc = 8       # Readius of the open circuit circle.
 
 # We will invoke the SimulationBeta class because it houses some specific
 # implementation details required for adaptive mesh refinement.
-m = em.SimulationBeta('Transition', loglevel='INFO')
-m.check_version("1.4.0")
+m = em.Simulation('Transition', loglevel='INFO')
+m.check_version("2.0.0")
 # Next we create the PCB designer class instance.
 pcb = em.geo.PCB(th, mm, material=em.lib.DIEL_RO4003C)
 
@@ -152,7 +151,7 @@ plot_sp(g.freq, [g.S(1,1), g.S(2,1)], labels=['S11','S21'])
 # Finally we make a 3D plot showing an animation of the Ez-field.
 field = data.field.find(freq=6e9)
 m.display.add_objects(*m.all_geos())
-m.display.animate().add_surf(*field.cutplane(1*mm, z=-th*mm/2).scalar('Ez','complex'), symmetrize=True)
+m.display.animate().add_field(field.cutplane(1*mm, z=-th*mm/2).scalar('Ez','complex'), symmetrize=True)
 m.display.add_portmode(p1, k0=field.k0)
 m.display.add_portmode(p2, k0=field.k0)
 m.display.show()

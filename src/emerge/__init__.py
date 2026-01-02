@@ -34,7 +34,7 @@ warnings.filterwarnings(
 
 import os
 
-__version__ = "1.4.0"
+__version__ = "2.0.0"
 
 NTHREADS = "1"
 os.environ["EMERGE_STD_LOGLEVEL"] = os.getenv("EMERGE_STD_LOGLEVEL", default="INFO")
@@ -62,7 +62,7 @@ LOG_CONTROLLER._set_log_buffer()
 
 import gmsh
 from ._emerge.simmodel import Simulation, SimulationBeta
-from ._emerge.material import Material, FreqCoordDependent, FreqDependent, CoordDependent
+#from ._emerge.material import Material, FreqCoordDependent, FreqDependent, CoordDependent
 from ._emerge import bc
 from ._emerge.solver import SolverBicgstab, SolverGMRES, SolveRoutine, ReverseCuthillMckee, Sorter, SolverPardiso, SolverUMFPACK, SolverSuperLU, EMSolver
 from ._emerge.cs import CoordinateSystem, CS, GCS, Plane, Axis, XAX, YAX, ZAX, XYPLANE, XZPLANE, YZPLANE, YXPLANE, ZXPLANE, ZYPLANE, cs
@@ -73,10 +73,15 @@ from ._emerge.geometry import select
 from ._emerge.mth.common_functions import norm, coax_rout, coax_rin, dot, cross
 from ._emerge.periodic import RectCell, HexCell
 from ._emerge.mesher import Algorithm2D, Algorithm3D
-from . import lib
+#from . import lib
 from ._emerge.howto import _HowtoClass
 from ._emerge.emerge_update import update_emerge
 from .auxilliary.touchstone import TouchstoneData
+from emsutil import isola, rogers, const, lib
+from emsutil.material import Material, MatProperty, FreqDependent, CoordDependent, FreqCoordDependent
+import emsutil.plot as plot
+from emsutil import EMergeTheme
+from emsutil import themes
 
 howto = _HowtoClass()
 

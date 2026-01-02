@@ -530,7 +530,7 @@ CS = CoordinateSystem
 # The global coordinate system
 GCS = CoordinateSystem(XAX, YAX, ZAX, np.zeros(3), _is_global=True)
 
-def cs(axes: str, origin: tuple[float, float, float] = (0.,0.,0.,)) -> CoordinateSystem:
+def cs(axes: str = 'xyz', origin: tuple[float, float, float] = (0.,0.,0.,)) -> CoordinateSystem:
     """Generate a coordinate system based on a simple string
     The string must contain the letters x, X, y, Y, z and/or Z. 
     Small letters refer to positive axes and capitals to negative axes.

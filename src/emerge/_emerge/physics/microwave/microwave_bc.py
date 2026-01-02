@@ -27,7 +27,7 @@ from ...coord import Line
 from ...geometry import GeoSurface, GeoObject
 from ...bc import BoundaryCondition, BoundaryConditionSet, Periodic
 from ...periodic import PeriodicCell, HexCell, RectCell
-from ...material import Material
+from emsutil import Material
 from ...const import Z0, C0, EPS0, MU0
 from ...logsettings import DEBUG_COLLECTOR
 

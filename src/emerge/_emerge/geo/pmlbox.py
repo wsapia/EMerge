@@ -17,7 +17,7 @@
 
 from ..geometry import GeoVolume
 from .shapes import Box, Alignment, Plate
-from ..material import Material, AIR, CoordDependent
+from emsutil import Material, AIR, CoordDependent
 import numpy as np
 from functools import partial
 

@@ -16,7 +16,7 @@
 # <https://www.gnu.org/licenses/>.
 
 from ...mesher import Mesher
-from ...material import Material
+from emsutil import Material
 from ...mesh3d import Mesh3D
 from ...coord import Line
 from ...geometry import GeoSurface, GeoVolume
@@ -230,6 +230,8 @@ class Microwave3D:
         self.mesher.min_size = 0.1 * self.mesher.max_size
 
         logger.debug(f'Setting global mesh size range to: {self.mesher.min_size*1000:.3f}mm - {self.mesher.max_size*1000:.3f}mm')
+    
+    set_frequencies = set_frequency
     
     def set_frequency_range(self, fmin: float, fmax: float, Npoints: int) -> None:
         """Set the frequency range using the np.linspace syntax
@@ -1098,6 +1100,7 @@ class Microwave3D:
             fielddata.freq = eig_freq
             fielddata._der = np.squeeze(er[0,0,:])
             fielddata._dur = np.squeeze(ur[0,0,:])
+            fielddata._dsig = np.squeeze(cond[0,0,:])
             fielddata._mode_field = Emode
             fielddata.basis = self.basis
         ### Compute S-parameters and return
@@ -1136,6 +1139,10 @@ class Microwave3D:
             urtri = np.zeros((3,3,self.mesh.n_tris), dtype=np.complex128)
             condtri = np.zeros((self.mesh.n_tris,), dtype=np.complex128)
 
+            er_scal = (er[0,0,:] + er[1,1,:] + er[2,2,:])/3
+            ur_scal = (ur[0,0,:] + ur[1,1,:] + ur[2,2,:])/3
+            cond_scal = (cond[0,0,:] + cond[1,1,:] + cond[2,2,:])/3
+            
             for itri in range(self.mesh.n_tris):
                 itet = self.mesh.tri_to_tet[0,itri]
                 ertri[:,:,itri] = er[:,:,itet]
@@ -1151,12 +1158,12 @@ class Microwave3D:
             
             fielddata = self.data.field.new(freq=freq, **self._params)
             fielddata.freq = freq
-            fielddata._der = np.squeeze(er[0,0,:])
-            fielddata._dur = np.squeeze(ur[0,0,:])
+            fielddata._der = np.squeeze(er_scal)
+            fielddata._dur = np.squeeze(ur_scal)
+            fielddata._dsig = np.squeeze(cond_scal)
 
             logger.info(f'Post Processing simulation frequency = {freq/1e9:.3f} GHz') 
 
-            
             # Recording port information
             for active_port in all_ports:
                 port_tets = self.mesh.get_face_tets(active_port.tags)

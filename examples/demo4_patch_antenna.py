@@ -37,7 +37,7 @@ f2 = 1.60e9             # stop frequency
 # --- Create simulation object -------------------------------------------
 model = em.Simulation('PatchAntenna')
 
-model.check_version("1.4.0") # Checks version compatibility.
+model.check_version("2.0.0") # Checks version compatibility.
 
 # --- Define geometry primitives -----------------------------------------
 # Substrate block centered at origin in XY, thickness in Z (negative down)
@@ -84,7 +84,7 @@ dielectric.set_material(em.Material(3.38, color="#207020", opacity=0.9))
 model.mw.set_resolution(0.2)
 
 # Frequency sweep across the resonance
-model.mw.set_frequency_range(f1, f2, 3)
+model.mw.set_frequency_range(f1, f2, 7)
 
 # --- Combine geometry into simulation -----------------------------------
 model.commit_geometry()
@@ -115,10 +115,11 @@ pec_selection = em.select(rpatch,ground)
 
 # Assigning the boundary conditions
 abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
+
 # --- Run frequency-domain solver ----------------------------------------
 model.view(plot_mesh=True, volume_mesh=False)
-
-data = model.mw.run_sweep(True, 3, multi_processing=True)
+model.view(bc=True)
+data = model.mw.run_sweep()
 
 # --- Post-process S-parameters ------------------------------------------
 freqs = data.scalar.grid.freq
@@ -134,18 +135,18 @@ ff1 = data.field.find(freq=1.575e9)\
 ff2 = data.field.find(freq=1.575e9)\
     .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
 
-plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
-plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
+plot_ff(ff1.ang*180/np.pi, [ff1.gain.norm, ff2.gain.norm], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
+plot_ff_polar(ff1.ang, [ff1.gain.norm, ff2.gain.norm], dB=True, dBfloor=-20)          # polar plot of radiation
 
 # --- 3D radiation visualization -----------------------------------------
 # Add geometry to 3D display
-model.display.add_object(rpatch)
+model.display.add_object(rpatch, opacity=0.2)
 model.display.add_object(dielectric)
-# Compute full 3D far-field and display surface colored by |E|
+# Compute full 3D far-field and display surface colored by |E|q
 field = data.field.find(freq=1.59e9)
-ff3d = field.farfield_3d(boundary_selection)
-surf = ff3d.surfplot('normE', rmax=60 * mm,
+ff3d = field.farfield_3d(boundary_selection, origin=(0,0,0))
+surf = ff3d.surfplot('normE', rmax=40 * mm,
                       offset=(0, 0, 20 * mm))
 
-model.display.add_surf(*surf)
+model.display.add_surf(*surf.xyzf)
 model.display.show()

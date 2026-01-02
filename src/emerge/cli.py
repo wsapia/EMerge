@@ -1,4 +1,3 @@
-import sys
 import argparse
 from ._emerge.projects.generate_project import generate_project
 

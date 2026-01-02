@@ -28,7 +28,7 @@ distance = 2*mm
 # Setup the simulation
 
 m = em.Simulation('PlottingDemo')
-m.check_version("1.4.0")
+m.check_version("2.0.0")
 
 box = em.geo.Box(wgb, wga, L, (-wgb/2, -wga/2, -L))
 cut1 = em.geo.Box(wgb, wga*(1-opening)/2, th, (-wgb/2, -wga/2, -distance-th/2))
@@ -192,27 +192,28 @@ dp.show()
 # class that makes creating this data and the plot arguments easier.
 
 dp.add_objects(*m.all_geos())
-dp.add_surf(*field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
+dp.add_field(field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
 dp.show()
 
-# The .scalar() method automatrically returns X, Y, Z, and Scalar. the * notation unpacks that. 
+# The .scalar() method automatrically returns a FieldPlotData object. This contains all the information needed to plot our result.
+# We can plug this into the add_field() function which accepts the FieldPlotData objects.
 # To animate this we simply add the animate call.
 
 #                                                               v Don't forget to set this to complex!
 dp.add_objects(*m.all_geos())
-dp.animate().add_surf(*field.cutplane(1*mm, x=0).scalar('Ex','complex'), symmetrize=True)
+dp.animate().add_field(field.cutplane(1*mm, x=0).scalar('Ex','complex'), symmetrize=True)
 dp.show()
 
 # Plotting fields on the surface of an object is also possible.
 dp.add_objects(*m.all_geos())
-dp.add_boundary_field(abc, field.boundary(abc).scalar('Ex','abs'), clim=(0, 600)) # we don't unpack here because of how this method is designed.
+dp.add_field(field.boundary(abc).scalar('Ex','abs'), clim=(0, 600)) # we don't unpack here because of how this method is designed.
 dp.show()
 
 # To ensure that two color bars are shared we can use the .cbar function
 
 dp.add_objects(*m.all_geos())
-dp.cbar('normE [V/m]', clim=(0, 4000)).add_surf(*field.cutplane(1*mm, x=0).scalar('normE'), symmetrize=False)
-dp.cbar('normE [V/m]').add_surf(*field.cutplane(1*mm, y=0).scalar('normE'), symmetrize=False)
+dp.cbar('normE [V/m]', clim=(0, 4000)).add_field(field.cutplane(1*mm, x=0).scalar('normE'), symmetrize=False)
+dp.cbar('normE [V/m]').add_field(field.cutplane(1*mm, y=0).scalar('normE'), symmetrize=False)
 dp.show()
 
 # We can also add farfield patterns using .add_surf(). All we need to do is create a Farfield dataset using the farfield_3d method.
@@ -227,19 +228,19 @@ dp.show()
 ff3d = field.farfield_3d(abc)
 
 dp.add_objects(*m.all_geos())
-dp.add_surf(*field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
-dp.add_surf(*ff3d.surfplot('normE','abs',True, rmax=20*mm, offset=(0,0,30*mm)))
+dp.add_field(field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
+dp.add_field(ff3d.surfplot('normE','abs',True, rmax=20*mm, offset=(0,0,30*mm)))
 dp.show()
 
 # Other useful methods are
 
-griddata = field.grid(3.3*mm)
+griddata = field.grid(2.5*mm)
 dp.add_objects(*m.all_geos())
 dp.add_title('Some text here!')
 dp.add_text('Instruction here','blue','lower_right')
 dp.add_portmode(my_port, k0=field.k0) # k0 is not needed here but it is often with modal-ports.
-dp.add_quiver(*griddata.vector('H','real'))
-dp.add_contour(*griddata.scalar('Ex','real'), symmetrize=True, Nlevels=30)
-dp.add_surf(*field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
-dp.add_surf(*ff3d.surfplot('normE','abs',True, rmax=20*mm, offset=(0,0,30*mm)))
+dp.cbar('H').add_field(griddata.vector('H','real'))
+dp.cbar('E').add_contour(*griddata.scalar('Ex','real').xyzf, symmetrize=True, Nlevels=30)
+dp.cbar('E').add_field(field.cutplane(1*mm, x=0).scalar('Ex','real'), symmetrize=True)
+dp.cbar('E').add_field(ff3d.surfplot('normE','abs',True, rmax=20*mm, offset=(0,0,30*mm)))
 dp.show()

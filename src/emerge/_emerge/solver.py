@@ -1013,9 +1013,9 @@ class SolveRoutine:
         """
         for solver in solvers:
             if isinstance(solver, EMSolver):
-                self.forced_solver.append(self.solvers[solver])
+                self.forced_solver = [self.solvers[solver],] 
             else:
-                self.forced_solver.append(solver)
+                self.forced_solver = [solver,]
     
     def disable(self, *solvers: EMSolver) -> None:
         """Disable a given Solver class instance as the main solver. 
@@ -1073,15 +1073,16 @@ class SolveRoutine:
             if isinstance(solver, Solver):
                 solver.set_options(pivoting_threshold=pivoting_threshold)
         
-    def reset(self) -> None:
+    def reset(self, reset_solver_preference: bool = False) -> None:
         """Reset all solver states"""
         for solver in self.solvers.values():
             solver.reset()
         self.sorter.reset()
         self.parallel = 'SI'
         self.smart_search = False
-        self.forced_solver = []
-        self.disabled_solver = []
+        if reset_solver_preference:
+            self.forced_solver = []
+            self.disabled_solver = []
 
     def _get_solver(self, A: csr_matrix, b: np.ndarray) -> Solver:
         """Returns the relevant Solver object given a certain matrix and source vector
@@ -1220,6 +1221,7 @@ class SolveRoutine:
         start = time.time()
         
         x_solved, report = solver.solve(Asorted, bsorted, self.precon, reuse_factorization=reuse, id=id)
+        
         end = time.time()
         simtime = end-start
         logger.info(f'{_pfx(self.pre,id)} Elapsed time taken: {simtime:.3f} seconds')

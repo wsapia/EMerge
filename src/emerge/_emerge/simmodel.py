@@ -497,6 +497,7 @@ class Simulation:
              opacity: float | None = None,
              labels: bool = False,
              bc: bool = False,
+             bw: bool = False,
              face_labels: bool = False) -> None:
         """View the current geometry in either the BaseDisplay object (PVDisplay only) or
         the GMSH viewer.
@@ -509,12 +510,16 @@ class Simulation:
             opacity (float | None, optional): The object/mesh opacity. Defaults to None.
             labels: (bool, optional): If geometry name labels should be shown. Defaults to False.
             bc: (bool, optional): If you wish to show boundary condition selections in the view
+            bw: (bool, optional): If you want to view in black-white mode.
         """
         if not (self.display is not None and self.mesh.defined) or use_gmsh:
             gmsh.model.occ.synchronize()
             gmsh.fltk.run()
+            
             return
-        
+        if bw:
+            self.display.drawing_bw()
+            
         for geo in self.state.current_geo_state:
             self.display.add_object(geo, mesh=plot_mesh, opacity=opacity, volume_mesh=volume_mesh, label=labels)
             
@@ -737,7 +742,328 @@ class Simulation:
         """
         logger.warning('define_geometry() will be derpicated. Use commit_geometry() instead.')
         self.commit_geometry(*args)
+    
+    
+
+    ############################################################
+    #                   ADAPTIVE MESH REFINEMENT              #
+    ############################################################
+    def _reset_mesh(self):
+        gmsh.model.mesh.clear()
+        self.mw.reset(_reset_bc = False)
+        self.state.reset_mesh()
+    
+    @staticmethod
+    def guess_R(P: float, last_ratio: float = 1.0) -> float:
+        # Coefficients for the refinement ratio calculation.
         
+        a0 = 0.5
+        c0 = 0.85
+        x0 = 12
+        q0 = (1-a0)*2/np.pi
+        b0 = np.tan((c0-a0)/q0)/x0
+        q0 = (0.8-a0)*2/np.pi
+        
+        ratio = (a0 + np.arctan(b0*P)*q0)
+        if last_ratio > 1.0:
+            ratio = ratio/0.9
+        if last_ratio < 1.0:
+            ratio = ratio*0.9
+        
+        return ratio
+    
+    @staticmethod
+    def compute_ratio(new_point_percentage: float, ratios: np.ndarray, percentages: np.ndarray, P_target: float) -> float:
+        """
+        Strategy:
+        - n=0: use guess_R(P_target, throttle=1.0)
+        - n=1: use guess_R with throttle 0.5 if last P < target, else 2.0 if last P > 2*target,
+                else keep the same R (already acceptable)
+        - n=2: fit P = a1*(1/R) + a0 and solve for R; fallback to through-origin model if needed
+
+        Returns R_guess in (0, 1].
+        """
+        #print(Rs, Ps)
+        ratios = (np.asarray(ratios, dtype=float))
+        percentages = (np.asarray(percentages, dtype=float))
+
+        # Clean
+        n = ratios.size
+        
+        if n == 1:
+            last_R = float(ratios[-1])
+            last_P = float(percentages[-1])
+            
+            if P_target <= last_P <= 2.0 * P_target:
+                # Already acceptable
+                return last_R * ((1.5*P_target)/last_P)**0.2
+            
+            if last_P > P_target*2.0:
+                return last_R / 0.8
+            else:
+                return last_R * 0.8
+
+        P_target = P_target*1.5
+        x = 1.0 / ratios
+        y = percentages
+        dy = y - P_target
+
+        # Indices by side of target
+        idx_lo = np.where(dy < 0)[0]  # below target
+        idx_hi = np.where(dy > 0)[0]  # above target
+        idx_eq = np.where(dy == 0)[0]
+
+        # Exact hit
+        if idx_eq.size > 0:
+            # Return corresponding R (already perfect)
+            R_exact = float(ratios[idx_eq[0]])
+            return float(np.clip(R_exact, 1e-6, 1.0))
+
+        def pick_two(indices, reverse=False):
+            # pick two closest to target among given indices
+            order = np.argsort(np.abs(dy[indices]))
+            if reverse:
+                # when all below, we want the two with largest y (closest from below)
+                order = np.argsort(-y[indices])
+            return indices[order[:2]]
+
+        # Choose two points
+        if idx_lo.size > 0 and idx_hi.size > 0:
+            # Bracket: closest below and closest above
+            i_lo = idx_lo[np.argmin(np.abs(dy[idx_lo]))]
+            i_hi = idx_hi[np.argmin(np.abs(dy[idx_hi]))]
+            i1, i2 = i_lo, i_hi
+        elif idx_lo.size == 0:
+            # All above: take two smallest-above (closest to target)
+            i12 = pick_two(idx_hi)  # by |dy|
+            if i12.size < 2 and idx_hi.size >= 2:
+                i12 = idx_hi[:2]
+            i1, i2 = i12[0], i12[1]
+        elif idx_hi.size == 0:
+            # All below: take two largest-below (closest from below)
+            i12 = pick_two(idx_lo, reverse=True)
+            if i12.size < 2 and idx_lo.size >= 2:
+                i12 = idx_lo[:2]
+            i1, i2 = i12[0], i12[1]
+        else:
+            # Fallback (should not trigger)
+            i1, i2 = 0, 1
+
+        x1, y1 = float(x[i1]), float(y[i1])
+        x2, y2 = float(x[i2]), float(y[i2])
+
+        # Linear solve in y(x): y = y1 + (y2-y1)/(x2-x1) * (x - x1)
+        # Target xt: xt = x1 + (P_target - y1) * (x2 - x1) / (y2 - y1)
+        if abs(y2 - y1) > 1e-16:
+            xt = x1 + (P_target - y1) * (x2 - x1) / (y2 - y1)
+        else:
+            # Degenerate: same y; choose midpoint in x
+            xt = 0.5 * (x1 + x2)
+
+        # Ensure positive xt
+        xt = float(max(xt, 1e-16))
+        R_new = 1.0 / xt
+
+        # Clamp to (0, 1]
+        return float(np.clip(R_new, 1e-6, 1.0))
+
+    def adaptive_mesh_refinement(self, 
+                                 max_steps: int = 6,
+                                 min_refined_passes: int = 1,
+                                 convergence: float = 0.02,
+                                 magnitude_convergence: float = 2.0,
+                                 phase_convergence: float = 180,
+                                 max_tets: int = 1e6,
+                                 refinement_ratio: float = 0.6,
+                                 growth_rate: float = 1.6,
+                                 minimum_refinement_percentage: float = 20.0, 
+                                 error_field_inclusion_percentage: float = 50.0,
+                                 minimum_steps: int = 1,
+                                 frequency: float | list[float] = None,
+                                 show_mesh: bool = False) -> SimulationDataset:
+        """ A beta-version of adaptive mesh refinement.
+
+        Convergence Criteria:
+            (1): max(abs(S[n]-S[n-1]))
+            (2): max(abs(abs(S[n]) - abs(S[n-1])))
+            (3): max(angle(S[n]/S[n-1])) * 180/π
+        
+        Args:
+            max_steps (int, optional): The maximum number of refinement steps. Defaults to 6.
+            min_refined_passes (int, optional): The minimum number of refined passes. Defaults to 1.
+            convergence (float, optional): The S-paramerter convergence (1). Defaults to 0.02.
+            magnitude_convergence (float, optional): The S-parameter magnitude convergence (2). Defaults to 2.0.
+            phase_convergence (float, optional): The S-parameter Phase convergence (3). Defaults to 180.
+            refinement_ratio (float, optional): The size reduction of mesh elements by original length. Defaults to 0.75.
+            growth_rate (float, optional): The mesh size growth rate. Defaults to 3.0.
+            minimum_refinement_percentage (float, optional): The minimum mesh size increase . Defaults to 15.0.
+            error_field_inclusion_percentage (float, optional): A percentage of tet elements to be included for refinement. Defaults to 5.0.
+            minimum_steps (int, optional): The minimum number of adaptive steps to execute. Defaults to 1.
+            frequency (float, optional): The refinement frequency. Defaults to None.
+            show_mesh (bool, optional): If the intermediate meshes should be shown (freezes simulation). Defaults to False
+
+        Returns:
+            SimulationDataset: _description_
+        """
+        from .physics.microwave.adaptive_mesh import select_refinement_indices, reduce_point_set, compute_convergence, tet_to_node
+        
+        max_freq = np.max(self.mw.frequencies)
+        
+        if frequency is not None:
+            sim_freqs = frequency
+            if isinstance(sim_freqs, float):
+                sim_freqs = [sim_freqs,]
+        else:
+            sim_freqs = [max_freq,]
+        
+        
+        S_matrices: list[list[np.ndarray]] = []
+
+        last_n_tets: int = self.mesh.n_tets
+        logger.info(f'Initial mesh has {last_n_tets} tetrahedra')  
+        
+        passed = 0
+        
+        self.state.stash()
+        
+        NF = len(sim_freqs)
+        
+        original_ratio = refinement_ratio
+        for step in range(1,max_steps+1):
+            
+            self.data.sim.new(iter_step=step)
+            
+            datas = []
+            fields = []
+            Smats = []
+            
+            for sf in sim_freqs:
+                data, solve_ids = self.mw._run_adaptive_mesh(step, sf)
+                datas.append(data)
+                fields.append(data.field[-1])
+                Smats.append(data.scalar[-1].Sp)
+                
+            S_matrices.append(Smats)
+            
+            if step > minimum_steps:
+                S0s = S_matrices[-2]
+                S1s = S_matrices[-1]
+                
+                max_complx = 0
+                max_mag = 0
+                max_phase = 0
+                
+                for i in range(NF):
+                    conv_complex, conv_mag, conv_phase = compute_convergence(S0s[i], S1s[i])
+                    max_complx = max(max_complx, conv_complex)
+                    max_mag = max(max_mag, conv_mag)    
+                    max_phase = max(max_phase, conv_phase)
+                    
+                logger.info(f'Pass {step}: Convergence = {max_complx:.3f}, Mag = {max_mag:.3f}, Phase = {max_phase:.1f} deg')
+                
+                if max_complx <= convergence and max_phase < phase_convergence and max_mag < magnitude_convergence:
+                    logger.info(f'Pass {step}: Mesh refinement passed!')
+                    passed += 1
+                else:
+                    passed = 0
+            
+            if passed >= min_refined_passes and step > minimum_steps:
+                logger.info(f'Adaptive mesh refinement successfull with {self.mesh.n_tets} tetrahedra.')
+                break
+            
+            errors = np.empty((self.mesh.n_tets, NF), dtype=np.float64)
+            for i in range(NF):
+                error, lengths = fields[i]._solution_quality(solve_ids)
+                errors[:,i] = error
+            
+            
+            error = np.max(errors, axis=1)
+                
+            idx = select_refinement_indices(error, error_field_inclusion_percentage/100)
+            idx = idx[::-1]
+            
+            npts = idx.shape[0]
+            np_percentage = npts/self.mesh.n_tets * 100
+            
+            original_ratio = 0.75*original_ratio + 0.25*refinement_ratio
+            refinement_ratio = original_ratio
+            Ratios = []
+            Percentages = []
+            
+            
+            included = np.zeros((self.mesh.n_tets, ), dtype=np.bool)
+            included[idx] = True
+            
+            coords, sizes = tet_to_node(self.mesh.nodes, self.mesh.tets, lengths, included)
+            self.mesher.add_refinement_points(coords, sizes, refinement_ratio*np.ones_like(sizes))#self.mw.mesh.centers[:,idx], lengths[idx], refinement_ratio*np.ones_like(lengths[idx]))
+                
+            new_ids = reduce_point_set(self.mesher._amr_coords, growth_rate, self.mesher._amr_sizes, refinement_ratio, 0.20)
+            
+            nremoved = self.mesher._amr_coords.shape[1] - len(new_ids)
+            
+            logger.info(f'    Pass {step}: Added {len(sizes) - nremoved} new refinement points with ratio {refinement_ratio}.')
+            
+            self.mesher._amr_coords = self.mesher._amr_coords[:,new_ids]
+            self.mesher._amr_sizes = self.mesher._amr_sizes[new_ids]
+            self.mesher._amr_ratios = self.mesher._amr_ratios[new_ids]
+            self.mesher._amr_new = self.mesher._amr_new[new_ids]
+            
+            logger.debug(f'    Initial refinement ratio: {refinement_ratio}')
+            
+            # Mesh refinement loop. Only escapes if the mesh refined a certain set percentage.
+            counter = 0
+            while True:
+                counter += 1
+                if counter == 10:
+                    logger.warning('    More than 10 attempts at reaching the target refinement. Continuing with current.')
+                    break
+                counter += 1
+                self._reset_mesh()
+                self.mesher.set_refinement_function(growth_rate, 2.0)
+                self.generate_mesh(True)
+                percentage = (self.mesh.n_tets/last_n_tets - 1) * 100
+                logger.info(f'    Pass {step}: New mesh has {self.mesh.n_tets} (+{percentage:.1f}%) tetrahedra.')  
+                
+                Ratios.append(refinement_ratio)
+                Percentages.append(percentage)
+                
+                if len(Percentages) >= 2:
+                    if abs(Percentages[-2]-Percentages[-1]) == 0.0:
+                        logger.warning(f'No refinement realized, decreasing refinment ratio.')
+                        refinement_ratio = refinement_ratio * 0.5
+                        self.mesher.set_ratio(refinement_ratio)
+                        continue
+                
+                if percentage < minimum_refinement_percentage or percentage > (minimum_refinement_percentage*2):
+                    
+                    refinement_ratio = self.compute_ratio(np_percentage, Ratios, Percentages, minimum_refinement_percentage)
+                    logger.info(f'    Refinement target not reached! New ratio = {refinement_ratio:.3f}')
+                    self.mesher.set_ratio(refinement_ratio)
+                    if refinement_ratio >= 1.0:
+                        logger.warning(f'Refinement ratio pushed above 1.0... continuing with current percentage.')
+                        break
+                    continue
+                
+                
+                break
+            
+            last_n_tets = self.mesh.n_tets
+            if show_mesh:
+                self.view(plot_mesh=True, volume_mesh=True)
+            
+            if last_n_tets > max_tets:
+                logger.warning(f'Aborting refinement because the number of tets exceeds the maximum: {last_n_tets}>{max_tets}')
+                break
+        if passed < min_refined_passes:
+            logger.warning('Adaptive mesh refinement did not converge!')
+            
+        if show_mesh:
+                self.view(plot_mesh=True, volume_mesh=True)
+        old = self.state.reload()
+        self.state.store_geometry_data()
+        
+        return old
+    
 class SimulationBeta(Simulation):
     
     

@@ -14,8 +14,8 @@ For ARM MacOS users it is reccommended to install UMFPACK and run this using mul
 
 """
 
-m = em.SimulationBeta('Vivaldi')
-m.check_version("1.4.0")
+m = em.Simulation('Vivaldi')
+m.check_version("2.0.0")
 
 mm = 0.001          # Millimeter
 g = 0.3*mm          # Narrow exponential taper slot gap size
@@ -139,8 +139,8 @@ ground = em.geo.subtract(ground, slots)
 # And we are done modelling!
 m.commit_geometry()
 
-# We set our frequency range from 3GHz to 10GHz in 31 setps.
-m.mw.set_frequency_range(3e9, 8e9, 31)
+# We set our frequency range from 3GHz to 10GHz in 21 setps.
+m.mw.set_frequency_range(3e9, 8e9, 21)
 m.mw.set_resolution(0.33)
 
 # Here we set our boundary conditions. The Absorbing boundary surfaace is the outside of the airbox.
@@ -152,6 +152,7 @@ m.mw.bc.LumpedPort(port, 1, Z0=50)
 m.mw.bc.AbsorbingBoundary(abc)
 
 m.generate_mesh()
+
 m.view(plot_mesh=True, volume_mesh=False)
 
 # Before we run we call our adaptive mesh refinement at 7GHz. You can change the frequency yourself.
@@ -179,5 +180,5 @@ plot_ff_polar(ff_data.ang, ff_data.normE/em.EISO, dB=True, title='Farfield E-pla
 
 # Finally we create a simple field plot.
 m.display.add_objects(*m.all_geos())
-m.display.add_surf(*data.field[1].cutplane(0.8*mm, z=-th*mm/2).scalar('Ey','real'), symmetrize=True)
+m.display.add_field(data.field[1].cutplane(0.8*mm, z=-th*mm/2).scalar('Ey','real'), symmetrize=True)
 m.display.show()

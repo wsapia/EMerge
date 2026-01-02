@@ -693,21 +693,25 @@ class Mesh3D(Mesh):
             SurfaceMesh: The resultant surface mesh
         """
         tri_ids = self.get_triangles(face_tags)
+        
         if origin is None:
             nodes = self.nodes[:,self.get_nodes(face_tags)]
             x0 = float(np.mean(nodes[0,:]))
             y0 = float(np.mean(nodes[1,:]))
             z0 = float(np.mean(nodes[2,:]))
-            origin = (x0, y0, z0)
+            sf_origin = (x0, y0, z0)
+        else:
+            sf_origin = origin
 
-        smesh = SurfaceMesh(self, tri_ids, origin)
+        smesh = SurfaceMesh(self, tri_ids, sf_origin)
         
-        tet_ids = np.max(self.tri_to_tet[:,tri_ids], axis=0)
-        tet_centers = self.centers[:,tet_ids]
-        tri_centers = self.tri_centers[:,tri_ids]
-        align = tri_centers-tet_centers
-        
-        smesh.normals = np.sign(np.sum(align*smesh.normals, axis=0))*smesh.normals
+        if origin is None:
+            tet_ids = np.max(self.tri_to_tet[:,tri_ids], axis=0)
+            tet_centers = self.centers[:,tet_ids]
+            tri_centers = self.tri_centers[:,tri_ids]
+            align = tri_centers-tet_centers
+            signflip = np.sign(np.sum(align*smesh.normals, axis=0))
+            smesh.normals = signflip*smesh.normals
         return smesh
     
 class SurfaceMesh(Mesh):

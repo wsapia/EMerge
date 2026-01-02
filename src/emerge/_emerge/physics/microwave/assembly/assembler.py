@@ -19,7 +19,7 @@ import numpy as np
 from ..microwave_bc import PEC, BoundaryCondition, RectangularWaveguide, RobinBC, PortBC, Periodic, MWBoundaryConditionSet
 from ....elements.nedelec2 import Nedelec2
 from ....elements.nedleg2 import NedelecLegrange2
-from ....material import Material
+from emsutil import Material
 from ....settings import Settings
 from scipy.sparse import csr_matrix
 from loguru import logger

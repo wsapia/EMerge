@@ -33,7 +33,7 @@ dx = 2 * mm              # distance from horn exit to PML start
 
 # Create simulation object
 m = em.Simulation('StandardGainHornAntenna')
-m.check_version("1.4.0") # Checks version compatibility.
+m.check_version("2.0.0") # Checks version compatibility.
 # --- Coordinate system for horn geometry -------------------------------
 hornCS = em.CS(em.YAX, em.ZAX, em.XAX)
 
@@ -88,7 +88,7 @@ radiation_boundary = air2.faces('back','top','right', tool=air)  # open faces
 abc = m.mw.bc.AbsorbingBoundary(m.select.face.inplane(Lhorn-dx,0,0,plane=em.YZPLANE))
 
 # View mesh and BC selections
-m.view(bc=True)
+m.view(selections=[radiation_boundary], bc=True)
 
 # --- Run frequency-domain solver ----------------------------------------
 data = m.mw.run_sweep()
@@ -101,7 +101,7 @@ plot_sp(scal.freq, scal.S(1,1), labels=['S11'])  # S11 vs frequency
 # Compute E and H on 2D cut for phi=0 plane over -90° to 90°
 ff_data = data.field[0].farfield_2d(
     (1, 0, 0), (0, 1, 0), radiation_boundary,
-    (-90, 90), syms=['Ez','Hy']
+    (-90, 90), syms=['Ez','Hy'], origin=(0,0,0)
 )
 
 plot_ff(ff_data.ang * 180/np.pi, ff_data.normE/em.lib.EISO, dB=True, ylabel='Gain [dBi]')
@@ -110,7 +110,7 @@ plot_ff(ff_data.ang * 180/np.pi, ff_data.normE/em.lib.EISO, dB=True, ylabel='Gai
 m.display.add_object(horn_in, opacity=0.1)
 m.display.add_object(air2, opacity=0.1)
 m.display.add_object(feed, opacity=0.1)
-m.display.add_surf(*data.field[0].farfield_3d(radiation_boundary, syms=['Ez','Hy'])\
+m.display.add_field(data.field[0].farfield_3d(radiation_boundary, syms=['Ez','Hy'], origin=(0,0,0))\
                 .surfplot('normE', 'abs', True, True, -30, 5*mm, (Lhorn,0,0)))
-m.display.add_surf(*data.field[0].cutplane(0.25*mm, z=0).scalar('Ez','real'), symmetrize=True)
+m.display.add_field(data.field[0].cutplane(0.25*mm, z=0).scalar('Ez','real'), symmetrize=True)
 m.display.show()
