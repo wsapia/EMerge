@@ -15,6 +15,8 @@
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
 
+# Last Cleanup: 2026-01-04
+
 from __future__ import annotations
 import numpy as np
 from typing import Callable
@@ -32,12 +34,9 @@ def gauss3_composite(x: np.ndarray, y: np.ndarray) -> float:
         ∫ f dx  ≈  (h/2) Σ_k w_k · f( x̄ + (h/2) ξ_k )
 
     where  h = x_{i+2}−x_i  and
-          ξ = (−√3/5, 0, +√3/5),
-          w = (8/9, 5/9, 8/9)  ← as requested.
+           ξ = (−√3/5, 0, +√3/5),
+           w = (8/9, 5/9, 8/9)
 
-    Because f is only known at the three nodes, we
-    rebuild the quadratic that interpolates them and
-    evaluate that polynomial at the Gauss points.
     """
     x = np.asarray(x, dtype=np.complex128)
     y = np.asarray(y, dtype=np.complex128)
@@ -47,10 +46,6 @@ def gauss3_composite(x: np.ndarray, y: np.ndarray) -> float:
     if x.size % 2 == 0:
         raise ValueError("Number of samples must be odd (… 0,1,2; 2,3,4; …).")
 
-    # constant spacing
-    h = x[1] - x[0]
-
-    # Gauss–Legendre nodes and *your* weights
     xi = np.sqrt(3/5)
     nodes   = np.array([-xi, 0.0, +xi])
     weights = np.array([5/9, 8/9, 5/9])
@@ -58,19 +53,11 @@ def gauss3_composite(x: np.ndarray, y: np.ndarray) -> float:
     total = 0.0
     for i in range(0, x.size - 2, 2):
         y0, y1, y2 = y[i:i+3]
-    #     array([[ 5.00000000e-01, -1.00000000e+00,  5.00000000e-01],
-    #    [-5.00000000e-01,  3.71914213e-17,  5.00000000e-01],
-    #    [-5.55111512e-17,  1.00000000e+00,  5.55111512e-17]])
-        # coefficients of the quadratic passing through
-        # (-1,y0), (0,y1), (1,y2) in local coords t
         a = y0*0.5 - y1 + 0.5*y2
         b = -y0*0.5 + 0.5*y2
         c = y1
-
-        # local → global mapping
         poly_vals = a*nodes**2 + b*nodes + c
         total += np.dot(weights, poly_vals)
-
     return total
 
 class Line:
@@ -78,6 +65,7 @@ class Line:
     def __init__(self, xpts: np.ndarray,
                  ypts: np.ndarray,
                  zpts: np.ndarray):
+        
         self.xs: np.ndarray = xpts
         self.ys: np.ndarray = ypts
         self.zs: np.ndarray = zpts
@@ -91,20 +79,36 @@ class Line:
         self.ymid: np.ndarray = 0.5*(ypts[:-1] + ypts[1:])
         self.zmid: np.ndarray = 0.5*(zpts[:-1] + zpts[1:])
 
-        self.dx = self.dxs[0]
-        self.dy = self.dys[0]
-        self.dz = self.dzs[0]
+        self.dx: float = self.dxs[0]
+        self.dy: float = self.dys[0]
+        self.dz: float = self.dzs[0]
     
     @property
     def cmid(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The midpoints of the line segments.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray, np.ndarray]: The midpoint coordinates (xmid, ymid, zmid).
+        """
         return self.xmid, self.ymid, self.zmid
 
     @property
     def cpoint(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The center points of the line segments."""
         return self.xs, self.ys, self.zs
     
     @staticmethod
     def from_points(start: np.ndarray, end: np.ndarray, Npts: int) -> Line:
+        """Create a Line object from start to end with Npts points.
+
+        Args:
+            start (np.ndarray): start point coordinates (x,y,z).
+            end (np.ndarray): end point coordinates (x,y,z).
+            Npts (int): Number of points along the line.
+
+        Returns:
+            Line: The created Line object.
+        """
         x1, y1, z1 = start
         x2, y2, z2 = end
         xs = np.linspace(x1, x2, Npts)
@@ -114,6 +118,14 @@ class Line:
     
     @staticmethod
     def from_path(*points: tuple[float,float,float] | np.ndarray, ds: float) -> Line:
+        """Creates a Line object from a series of points with approximate spacing ds.
+
+        Args:
+            ds (float): Approximate spacing between points.
+
+        Returns:
+            Line: The created Line object.
+        """
         xpts = []
         ypts = []
         zpts = []
@@ -141,4 +153,12 @@ class Line:
         return gauss3_composite(self.l, EdotL)
     
     def _integrate(self, quantity: np.ndarray) -> complex:
+        """Integrates a quantity of values defined along the line.
+
+        Args:
+            quantity (np.ndarray): The quantity values along the line.
+
+        Returns:
+            complex: The integrated value.
+        """
         return gauss3_composite(self.l, quantity)

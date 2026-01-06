@@ -43,7 +43,7 @@ import joblib
 from atexit import register
 import signal
 from .. import __version__
-from .mesher import Algorithm3D
+
 ############################################################
 #                   EXCEPTION DEFINITIONS                  #
 ############################################################
@@ -991,7 +991,7 @@ class Simulation:
             Percentages = []
             
             
-            included = np.zeros((self.mesh.n_tets, ), dtype=np.bool)
+            included = np.zeros((self.mesh.n_tets, ), dtype=np.bool_)
             included[idx] = True
             
             coords, sizes = tet_to_node(self.mesh.nodes, self.mesh.tets, lengths, included)
@@ -1324,7 +1324,7 @@ class SimulationBeta(Simulation):
             Percentages = []
             
             
-            included = np.zeros((self.mesh.n_tets, ), dtype=np.bool)
+            included = np.zeros((self.mesh.n_tets, ), dtype=np.bool_)
             included[idx] = True
             
             coords, sizes = tet_to_node(self.mesh.nodes, self.mesh.tets, lengths, included)

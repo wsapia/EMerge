@@ -1,11 +1,10 @@
-# inside your module, e.g. utils.py
 import os
 import sys
-
 import ast
 import textwrap
 from pathlib import Path
 
+# Last Cleanup: 2026-01-04
 
 def _is_plain_check_run(test: ast.AST) -> bool:
     """True only for a bare call to check_run() as the entire if-test."""

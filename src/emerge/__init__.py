@@ -34,12 +34,12 @@ warnings.filterwarnings(
 
 import os
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
-NTHREADS = "1"
+NTHREADS = "8"
 os.environ["EMERGE_STD_LOGLEVEL"] = os.getenv("EMERGE_STD_LOGLEVEL", default="INFO")
 os.environ["EMERGE_FILE_LOGLEVEL"] = os.getenv("EMERGE_FILE_LOGLEVEL", default="DEBUG")
-os.environ["OMP_NUM_THREADS"] = os.getenv("OMP_NUM_THREADS", default="1")
+os.environ["OMP_NUM_THREADS"] = os.getenv("OMP_NUM_THREADS", default="5")
 os.environ["MKL_NUM_THREADS"] = os.getenv("MKL_NUM_THREADS", default="4")
 os.environ["OPENBLAS_NUM_THREADS"] = NTHREADS
 os.environ["VECLIB_NUM_THREADS"] = NTHREADS

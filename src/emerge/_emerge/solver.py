@@ -33,6 +33,7 @@ from enum import Enum
 _PARDISO_AVAILABLE = False
 _UMFPACK_AVAILABLE = False
 _CUDSS_AVAILABLE = False
+_MUMPS_AVAILABLE = False
 
 """ Check if the PC runs on a non-ARM architechture
 If so, attempt to import PyPardiso (if its installed)
@@ -59,6 +60,17 @@ try:
 except ModuleNotFoundError:
     logger.debug('UMFPACK not found, defaulting to SuperLU')
 
+############################################################
+#                           MUMPS                          #
+############################################################
+
+
+try:
+    from .solve_interfaces.mumps_interface import MUMPSInterface # type: ignore
+    _MUMPS_AVAILABLE = True
+except ModuleNotFoundError:
+    logger.debug('MUMPS not found, defaulting to SuperLU')
+    
 ############################################################
 #                           CUDSS                          #
 ############################################################
@@ -422,7 +434,6 @@ class ReverseCuthillMckee(Sorter):
 #                      PRECONDITIONERS                     #
 ############################################################
 
-
 class ILUPrecon(Preconditioner):
     """ Implements the incomplete LU preconditioner on matrix A. """
     def __init__(self):
@@ -628,6 +639,63 @@ class SolverUMFPACK(Solver):
             "Pivoting Threshold": str(self._pivoting_threshold),
         }
         return x, SolveReport(solver=str(self), exit_code=0, aux=aux)
+
+class SolverMUMPS(Solver):
+    """ Implements the MUMPS Sparse SP solver."""
+    req_sorter = False
+    real_only = False
+
+    def __init__(self, pre: str):
+        super().__init__(pre)
+        logger.trace(self.pre + 'Creating MUMPS solver')
+        self.A: np.ndarray = None
+        self.b: np.ndarray = None
+        
+        self.mumps: MUMPSInterface | None = None
+        
+        # SETTINGS
+        self._pivoting_threshold: float = 0.001
+
+        self.fact_symb: bool = False
+        self.initalized: bool = False
+
+    def initialize(self):
+        if self.initalized:
+            return
+        logger.trace(self.pre + 'Initializing MUMPS Solver')
+        self.mumps = MUMPSInterface()
+        self.initalized = True
+        
+    def reset(self) -> None:
+        logger.trace(self.pre + 'Resetting MUMPS solver state')
+        #self.mumps.destroy()
+        self.fact_symb = False
+    
+    # def set_options(self, pivoting_threshold: float | None = None) -> None:
+    #     self.initialize()
+    #     if pivoting_threshold is not None:
+    #         self.umfpack.control[um.UMFPACK_PIVOT_TOLERANCE] = pivoting_threshold # ty: ignore
+    #         self.umfpack.control[um.UMFPACK_SYM_PIVOT_TOLERANCE] = pivoting_threshold # ty: ignore
+    #         self._pivoting_threshold = pivoting_threshold
+
+    def duplicate(self) -> Solver:
+        new_solver = self.__class__(self.pre)
+        return new_solver
+
+    def solve(self, A, b, precon, reuse_factorization: bool = False, id: int = -1) -> tuple[np.ndarray, SolveReport]:
+        logger.info(f'{_pfx(self.pre,id)} Calling MUMPS Solver.')
+        if self.fact_symb is False:
+            logger.trace(f'{_pfx(self.pre,id)} Executing symbollic factorization.')
+            self.mumps.analyse_matrix(A)
+            self.fact_symb = True
+        if not reuse_factorization:
+            logger.trace(f'{_pfx(self.pre,id)} Executing numeric factorization.')
+            self.mumps.factorize(A)
+            self.A = A
+        logger.trace(f'{_pfx(self.pre,id)} Solving linear system.')
+        x, _ = self.mumps.solve(b) # ty: ignore
+        return x, SolveReport(solver=str(self), exit_code=0)
+
 
 class SolverPardiso(Solver):
     """ Implements the PARDISO solver through PyPardiso. """
@@ -880,11 +948,14 @@ class EMSolver(Enum):
     SMART_ARPACK = 6
     SMART_ARPACK_BMA = 7
     CUDSS = 8
-
+    MUMPS = 9
+    
     def create_solver(self, pre: str) -> Solver | EigSolver | None:
         if self==EMSolver.UMFPACK and not _UMFPACK_AVAILABLE:
             return None
         elif self==EMSolver.PARDISO and not _PARDISO_AVAILABLE:
+            return None
+        elif self==EMSolver.MUMPS and not _MUMPS_AVAILABLE:
             return None
         if self==EMSolver.CUDSS and not _CUDSS_AVAILABLE:
             return None
@@ -899,7 +970,8 @@ class EMSolver(Enum):
                   5: SolverARPACK,
                   6: SmartARPACK,
                   7: SmartARPACK_BMA,
-                  8: SolverCuDSS
+                  8: SolverCuDSS,
+                  9: SolverMUMPS
             
         }
         return mapper.get(self.value, None)

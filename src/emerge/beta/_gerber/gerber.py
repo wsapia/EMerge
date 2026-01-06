@@ -37,7 +37,7 @@ from ..._emerge.mth.loopsplit import Loop
 from loguru import logger
 
 N_CIRC_MIN = 6
-N_CIRC_MAX = 12
+N_CIRC_MAX = 21
 
 def _calc_via_segs(diameter: float, nsegments: int, edge_size: float | None = None) -> int:
     if edge_size is not None:
@@ -75,10 +75,10 @@ def semi_circ(p: tuple[float, float], u: tuple[float, float], w: float, N: int, 
     x2, y2 = p
     ux, uy = u
     urx, ury = uy, -ux
-    ths = np.linspace(0,np.pi,N)[1:-1]
+    ths = np.linspace(0.01,np.pi-0.01,N)#[1:-1]
     pes = []
-    ex = w*np.sin(np.pi/(2*N))*ux 
-    ey = w*np.sin(np.pi/(2*N))*uy
+    ex = 0*w*np.sin(np.pi/(2*N))*ux 
+    ey = 0*w*np.sin(np.pi/(2*N))*uy
     for th in ths:
         c = (w*urx + w*ury*1j)*np.exp(1j*th)
         px = x2 + c.real
@@ -122,13 +122,18 @@ def parse_arc(cmd: Arc2, ds: float, reverse: bool, Nseg: int, max_size: float | 
     dy0 = float(cmd.get_relative_start_point().y.as_millimeters())
     dx1 = float(cmd.get_relative_end_point().x.as_millimeters())
     dy1 = float(cmd.get_relative_end_point().y.as_millimeters())
+    
     if reverse:
         dx0, dy0, dx1, dy1 = dx1, dy1, dx0, dy0
+        
     w = float(cmd.aperture.diameter.as_millimeters())/2
     
-    dang = np.angle((dx1+1j*dy1)/(dx0+1j*dy0)) #% (2*np.pi)
+    print(w)
+    dang = np.angle((dx1+1j*dy1)/(dx0+1j*dy0))
     if dang > 0:
-        raise ValueError(f'Dang is positive {dang}')
+        dang = dang - 2*np.pi
+        #raise ValueError(f'Dang is positive {dang}, {xc},{yc},{dx0},{dy0},{dx1},{dy1}')
+    
     R = (dx0**2 + dy0**2)**0.5
     Nang = abs(int(np.ceil(1.5*dang*R/ds)))
     angs = np.linspace(0,dang,Nang)
@@ -138,8 +143,9 @@ def parse_arc(cmd: Arc2, ds: float, reverse: bool, Nseg: int, max_size: float | 
     psc1 = c_to_xy([cc+arm*np.exp(1j*th)*(R-w)/R for th in angs])
     psc2 = c_to_xy([cc+arm*np.exp(1j*th)*(R+w)/R for th in angs][::-1])
     
-    end_cap = semi_circ((xc+dx1, yc+dy1), dphi_cw((dx1, dy1)), w, Nseg, max_size)
+    
     begin_cap = semi_circ((xc+dx0, yc+dy0), dphi_ccw((dx0, dy0)), w, Nseg, max_size)
+    end_cap = semi_circ((xc+dx1, yc+dy1), dphi_cw((dx1, dy1)), w, Nseg, max_size)
     
     points = psc1+end_cap+psc2+begin_cap
     return points
@@ -167,6 +173,7 @@ def parse_line(cmd: Line2, min_dist: float, ncirc:int , size_circ) -> list[tuple
     urx = uy
     ury = -ux
     w = diam/2
+    
     
     p1 = (x1+w*urx, y1+w*ury)
     p2 = (x2+w*urx, y2+w*ury)
@@ -417,7 +424,7 @@ class GerberLayer:
                 continue
             
             if isinstance(cmd, CCArc2):
-                points = parse_arc(cmd, self.res_mm, True, self._nseg, self._seg_size_mm)
+                points = parse_arc(cmd, self.res_mm, False, self._nseg, self._seg_size_mm)
                 self._add_poly(points, clear, True)
                 continue
             
@@ -513,7 +520,7 @@ class GerberLayer:
            
             self.xs = xall
             self.ys = yall
-            
+            gmsh.fltk.run()
             if poly is None:
                 poly = geo.unite(*surfs)
                 continue
@@ -523,6 +530,6 @@ class GerberLayer:
             else:
                 poly = geo.subtract(poly, geo.unite(*surfs))
             
-            gmsh.fltk.run()
+            
         return poly
             

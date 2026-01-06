@@ -15,27 +15,61 @@
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
 
+# Last Cleanup: 2026-01-04
+
 from __future__ import annotations
 import gmsh # type: ignore
 from emsutil import Material
 from emsutil.lib import AIR
-from .selection import FaceSelection, DomainSelection, EdgeSelection, PointSelection, Selection, SelectionError
+from .selection import FaceSelection, DomainSelection, EdgeSelection, PointSelection, Selection
 from loguru import logger
 from typing import Literal, Any, Iterable, Callable
 import numpy as np
 
 
-def _map_tags(tags: list[int], mapping: dict[int, list[int]]):
+FaceNames = Literal['back','front','left','right','top','bottom']
+
+############################################################
+#                         FUNCTIONS                        #
+############################################################
+
+def _map_tags(tags: list[int], mapping: dict[int, list[int]]) -> list[int]:
+    """ Applies a tag mapping to a list of tags.
+
+    Args:
+        tags (list[int]): The input tags
+        mapping (dict[int, list[int]]): The mapping dictionary from tag to new tags
+
+    Returns:
+        list[int]: The new list of tags
+    """
     new_tags = []
     for tag in tags:
         new_tags.extend(mapping.get(tag, [tag,]))
     return new_tags
 
-def _bbcenter(x1, y1, z1, x2, y2, z2):
+
+def _bbcenter(x1: float, y1: float, z1: float, x2: float, y2: float, z2: float) -> np.ndarray:
+    """Returns the center point of a bounding box defined by two corner points.
+
+    Args:
+        x1 (float): The x-coordinate of the first corner.
+        y1 (float): The y-coordinate of the first corner.
+        z1 (float): The z-coordinate of the first corner.
+        x2 (float): The x-coordinate of the second corner.
+        y2 (float): The y-coordinate of the second corner.
+        z2 (float): The z-coordinate of the second corner.
+
+    Returns:
+        np.ndarray: The center point as a numpy array [x, y, z].
+    """
     return np.array([(x1+x2)/2, (y1+y2)/2, (z1+z2)/2])
 
 
-FaceNames = Literal['back','front','left','right','top','bottom']
+############################################################
+#                          CLASSES                         #
+############################################################
+
 
 class _KEY_GENERATOR:
 
@@ -47,7 +81,9 @@ class _KEY_GENERATOR:
         return self.start
 
 class _GeometryManager:
-
+    """The Geometry manager is a singleton class that keeps track of all geometries
+    
+    """
     def __init__(self):
         self.geometry_list: dict[str, dict[str, GeoObject]] = dict()
         self.active: str = ''

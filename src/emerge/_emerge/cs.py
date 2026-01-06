@@ -15,6 +15,8 @@
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
 
+# Last Cleanup: 2026-01-04
+
 from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass, field
@@ -77,7 +79,7 @@ class Axis:
         Returns:
             float: The resultant vector (A·B)
         """
-        return np.dot(self.vector, other.vector)
+        return self.x*other.x + self.y*other.y + self.z*other.z
     
     def pair(self, other: Axis) -> Plane:
         """Pair this vector with another to span the plane A⨂B
@@ -110,15 +112,24 @@ class Axis:
         """
         ax = Axis(np.array([1, 0, 0]))
         if np.abs(self.dot(ax)) > 0.999:
-            
             ax = Axis(np.array([0, 1, 0]))
         ax1 = self.cross(ax)
         ax2 = self.cross(ax1).neg
         return CoordinateSystem(ax2, ax1, self, np.array(origin))
 
+
+############################################################
+#                         CONSTANTS                        #
+############################################################
+
 XAX: Axis = Axis(np.array([1, 0, 0]))
 YAX: Axis = Axis(np.array([0, 1, 0]))
 ZAX: Axis = Axis(np.array([0, 0, 1]))
+
+
+############################################################
+#                         FUNCTIONS                        #
+############################################################
 
 def _parse_vector(vec: np.ndarray | tuple[float, float, float] | list[float] | Axis) -> np.ndarray:
     """ Takes an array, tuple, list or Axis and alwasys returns an array."""
@@ -146,6 +157,11 @@ def _parse_axis(vec: np.ndarray | tuple[float, float, float] | list[float] | Axi
     elif isinstance(vec, Axis):
         return vec
     return Axis(np.array(vec))
+
+
+############################################################
+#                        PLANE CLASS                       #
+############################################################
 
 @dataclass
 class Plane:
@@ -258,12 +274,21 @@ class Plane:
 
         return xs.reshape(shp), ys.reshape(shp), zs.reshape(shp)
 
+
+############################################################
+#                         CONSTANTS                        #
+############################################################
+
 XYPLANE = Plane(XAX, YAX)
 XZPLANE = Plane(XAX, ZAX)
 YZPLANE = Plane(YAX, ZAX)
 YXPLANE = Plane(YAX, XAX)
 ZXPLANE = Plane(ZAX, XAX)
 ZYPLANE = Plane(ZAX, YAX)
+
+############################################################
+#                  COORDINATE SYSTEM CLASS                 #
+############################################################
 
 
 @dataclass
@@ -284,19 +309,19 @@ class CoordinateSystem:
     yax: Axis
     zax: Axis
     origin: np.ndarray = field(default_factory=lambda: np.array([0,0,0]))
+    _basis: np.ndarray = field(default=None)
+    _basis_inv: np.ndarray = field(default=None)
     _is_global: bool = False
 
     def __post_init__(self):
         self.xax = _parse_axis(self.xax)
         self.yax = _parse_axis(self.yax)
         self.zax = _parse_axis(self.zax)
-
         self._basis = np.array([self.xax.np, self.yax.np, self.zax.np]).T
-
         self._basis_inv = np.linalg.pinv(self._basis)
 
     def __repr__(self) -> str:
-        return f"CoordinateSystem({self.xax}, {self.yax}, {self.zax}, {self.origin})"
+        return f"CS({self.xax}, {self.yax}, {self.zax}, {self.origin})"
     
     def copy(self) -> CoordinateSystem:
         """ Creates a copy of this coordinate system."""
@@ -316,7 +341,8 @@ class CoordinateSystem:
         csnew = CoordinateSystem(self.xax, self.yax, self.zax, self.origin + np.array([dx, dy, dz]))
         return csnew
     
-    def rotate(self, axis: tuple | list | np.ndarray | Axis, 
+    def rotate(self, 
+               axis: tuple | list | np.ndarray | Axis, 
                angle: float, 
                degrees: bool = True,
                origin: bool | np.ndarray = False) -> CoordinateSystem:
@@ -346,10 +372,10 @@ class CoordinateSystem:
             [   0,   -u[2],  u[1]],
             [ u[2],     0,  -u[0]],
             [-u[1],  u[0],     0]
-        ], dtype=float)
+        ], dtype=np.float64)
 
         # Rodrigues' rotation formula: R = I + sinθ·K + (1−cosθ)·K²
-        Imat = np.eye(3, dtype=float)
+        Imat = np.eye(3, dtype=np.float64)
         R = Imat + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
 
         # Rotate each axis and the origin
@@ -386,13 +412,11 @@ class CoordinateSystem:
         Returns:
             np.ndarray: The affine transformation matrix.
         """
-        # ensure they’re 1-D
         x = self.xax.vector
         y = self.yax.vector
         z = self.zax.vector
         o = self.origin
-
-        T = np.eye(4, dtype=float)
+        T = np.eye(4, dtype=np.float64)
         T[0:3, 0] = x
         T[0:3, 1] = y
         T[0:3, 2] = z
@@ -411,7 +435,7 @@ class CoordinateSystem:
         o = T[0:3, 3]
         R_inv = np.linalg.inv(R)
         o_new = - R_inv @ o
-        T_inv = np.eye(4, dtype=float)
+        T_inv = np.eye(4, dtype=np.float64)
         T_inv[0:3, 0:3] = R_inv
         T_inv[0:3, 3]   = o_new
         return T_inv
@@ -432,7 +456,8 @@ class CoordinateSystem:
         zg = self.xax.np[2]*x + self.yax.np[2]*y + self.zax.np[2]*z + self.origin[2]
         return xg, yg, zg
     
-    def in_local_cs(self, x: np.ndarray,
+    def in_local_cs(self, 
+                    x: np.ndarray,
                     y: np.ndarray,
                     z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Converts x,y,z coordinates into the local coordinate system.
@@ -454,7 +479,8 @@ class CoordinateSystem:
         z = B[2,0]*xg + B[2,1]*yg + B[2,2]*zg
         return x, y, z
     
-    def in_global_basis(self, x: np.ndarray,
+    def in_global_basis(self, 
+                        x: np.ndarray,
                         y: np.ndarray,
                         z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Converts x,y,z vector components into the global coordinate basis.
@@ -472,7 +498,8 @@ class CoordinateSystem:
         zg = self.xax.np[2]*x + self.yax.np[2]*y + self.zax.np[2]*z
         return xg, yg, zg
     
-    def in_local_basis(self, x: np.ndarray,
+    def in_local_basis(self, 
+                          x: np.ndarray,
                           y: np.ndarray,
                           z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Converts x,y,z vector components into the local coordinate basis.
@@ -524,11 +551,18 @@ class CoordinateSystem:
         """ The z-axis unit vector in global coordinates."""
         return self.zax.np
 
-# A shorthand alias for the CoordinateSystem Class 
-CS = CoordinateSystem
 
-# The global coordinate system
+############################################################
+#                         CONSTANTS                        #
+############################################################
+
+CS = CoordinateSystem
 GCS = CoordinateSystem(XAX, YAX, ZAX, np.zeros(3), _is_global=True)
+
+
+############################################################
+#                         FUNCTIONS                        #
+############################################################
 
 def cs(axes: str = 'xyz', origin: tuple[float, float, float] = (0.,0.,0.,)) -> CoordinateSystem:
     """Generate a coordinate system based on a simple string
