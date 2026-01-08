@@ -20,5 +20,5 @@ from .pmlbox import pmlbox
 from .horn import Horn
 from .shapes import Cylinder, CoaxCylinder, Box, XYPlate, HalfSphere, Sphere, Plate, OldBox, Alignment, Cone
 from .operations import subtract, add, embed, remove, rotate, mirror, change_coordinate_system, translate, intersect, unite, expand_surface, stretch, extrude
-from .polybased import XYPolygon, GeoPrism, Disc, Curve
+from .polybased import XYPolygon, XZPolygon, YZPolygon, GeoPrism, Disc, Curve
 from .step import STEPItems

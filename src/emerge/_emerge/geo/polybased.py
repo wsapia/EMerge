@@ -20,7 +20,7 @@ from ..cs import CoordinateSystem, GCS, Axis, _parse_axis
 from ..geometry import GeoVolume, GeoPolygon, GeoEdge, GeoSurface
 from .shapes import Alignment
 import gmsh
-from typing import Generator, Callable
+from typing import Generator, Callable, Iterable
 from ..selection import FaceSelection
 from typing import Literal
 from functools import reduce
@@ -103,7 +103,7 @@ def rotate_point(point: tuple[float, float, float],
     return tuple(rotated)
 
 def _dist(p1: tuple[float, float], p2: tuple[float, float]) -> float:
-    return ((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)**(0.5)
+    return np.linalg.norm(p2 - p1)
 
 def _pair_points(x1: np.ndarray,
                  y1: np.ndarray,
@@ -155,12 +155,9 @@ class GeoPrism(GeoVolume):
     """The GepPrism class generalizes the GeoVolume for extruded convex polygons.
     Besides having a volumetric definitions, the class offers a .front_face 
     and .back_face property that selects the respective faces.
-
-    Args:
-        GeoVolume (_type_): _description_
     """
     def __init__(self,
-                 volume_tag: int,
+                 volume_tag: int | Iterable[int],
                  front_tag: int | None = None,
                  side_tags: list[int] | None = None,
                  _axis: Axis | None = None,
@@ -171,7 +168,7 @@ class GeoPrism(GeoVolume):
         
         if front_tag is not None and side_tags is not None:
             self.front_tag: int = front_tag
-            self.back_tag: int = None
+            self.back_tag: int | None = None
 
             gmsh.model.occ.synchronize()
             self._add_face_pointer('back', tag=self.front_tag)
@@ -248,27 +245,27 @@ class GeoPrism(GeoVolume):
         """The outside faces excluding the top and bottom."""
         return self.boundary(exclude=('front','back'))
 
-class XYPolygon:
-    """This class generalizes a polygon in an un-embedded XY space that can be embedded in 3D space.
+class _2DPolygon:
+    """This class generalizes a polygon in an un-embedded 2D space that can be embedded in 3D space.
     """
-    def __init__(self, 
-                 xs: np.ndarray | list | tuple | None = None,
-                 ys: np.ndarray | list | tuple | None = None,
+    def __init__(self,
+                 d1s: np.ndarray | list | tuple | None = None,
+                 d2s: np.ndarray | list | tuple | None = None,
                  cs: CoordinateSystem | None = None,
                  resolution: float = 1e-6):
-        """Constructs an XY-plane placed polygon.
+        """Constructs an 2D-plane placed polygon.
 
         Args:
-            xs (np.ndarray): The X-points
-            ys (np.ndarray): The Y-points
+            d1s (np.ndarray): The d1-points
+            d2s (np.ndarray): The d2-points
         """
-        if xs is None:
-            xs = []
-        if ys is None:
-            ys = []
+        if d1s is None:
+            d1s = []
+        if d2s is None:
+            d2s = []
 
-        self.x: np.ndarray = np.asarray(xs)
-        self.y: np.ndarray = np.asarray(ys)
+        self.d1s: np.ndarray = np.asarray(d1s)
+        self.d2s: np.ndarray = np.asarray(d2s)
 
         self.fillets: list[tuple[float, int]] = []
         
@@ -277,12 +274,17 @@ class XYPolygon:
 
     @property
     def center(self) -> tuple[float, float]:
-        return np.mean(self.x), np.mean(self.y)
+        return np.mean(self.d1s), np.mean(self.d2s)
+
+    @property
+    def points(self) -> np.array:
+        """List of all the 2D points in the polygon"""
+        return np.array([self.d1s, self.d2s]).T
     
     @property
     def length(self):
-        return sum([((self.x[i2]-self.x[i1])**2 + (self.y[i2]-self.y[i1])**2)**0.5 for i1, i2 in zip(range(self.N-1),range(1, self.N))])
-        
+        return sum([np.linalg.norm(self.points[i2] - self.points[i1]) for i1, i2 in zip(range(self.N - 1), range(1, self.N))])
+
     @property
     def N(self) -> int:
         """The number of polygon points
@@ -290,16 +292,16 @@ class XYPolygon:
         Returns:
             int: The number of points
         """
-        return len(self.x)
+        return len(self.d1s)
     
     def _check(self) -> None:
         """Checks if the last point is the same as the first point.
-        The XYPolygon does not store redundant points p[0]==p[N] so if these are
+        The _2DPolygon does not store redundant points p[0]==p[N] so if these are
         the same, this function will remove the last point.
         """
-        if np.sqrt((self.x[-1]-self.x[0])**2 + (self.y[-1]-self.y[0])**2) < 1e-9:
-            self.x = self.x[:-1]
-            self.y = self.y[:-1]
+        if np.sqrt((self.d1s[-1] - self.d1s[0]) ** 2 + (self.d2s[-1] - self.d2s[0]) ** 2) < 1e-9:
+            self.d1s = self.d1s[:-1]
+            self.d2s = self.d2s[:-1]
         
     @property
     def area(self) -> float:
@@ -308,32 +310,32 @@ class XYPolygon:
         Returns:
             float: The area in square meters
         """
-        return 0.5*np.abs(np.dot(self.x,np.roll(self.y,1))-np.dot(self.y,np.roll(self.x,1)))
+        return 0.5*np.abs(np.dot(self.d1s, np.roll(self.d2s, 1)) - np.dot(self.d2s, np.roll(self.d1s, 1)))
 
-    def incs(self, cs: CoordinateSystem) -> XYPolygon:
+    def incs(self, cs: CoordinateSystem) -> _2DPolygon:
         self._cs = cs
         return self
 
-    def extend(self, xpts: list[float], ypts: list[float]) -> XYPolygon:
-        """Adds a series for x and y coordinates to the existing polygon.
+    def extend(self, d1pts: list[float], d2pts: list[float]) -> _2DPolygon:
+        """Adds a series for d1 and d2 coordinates to the existing polygon.
 
         Args:
-            xpts (list[float]): The list of x-coordinates
-            ypts (list[float]): The list of y-coordinates
+            d1pts (list[float]): The list of d1-coordinates
+            d2pts (list[float]): The list of d2-coordinates
 
         Returns:
-            XYPolygon: The same XYpolygon object
+            _2DPolygon: The same _2DPolygon object
         """
-        self.x = np.hstack([self.x, np.array(xpts)])
-        self.y = np.hstack([self.y, np.array(ypts)])
+        self.d1s = np.hstack([self.d1s, np.array(d1pts)])
+        self.d2s = np.hstack([self.d2s, np.array(d2pts)])
         return self
     
     def iterate(self) -> Generator[tuple[float, float],None, None]:
-        """ Iterates over the x,y coordinates as a tuple."""
+        """ Iterates over the coordinates as a tuple."""
         for i in range(self.N):
-            yield (self.x[i], self.y[i])
+            yield (self.d1s[i], self.d2s[i])
 
-    def fillet(self, radius: float, *indices: int) -> XYPolygon:
+    def fillet(self, radius: float, *indices: int) -> _2DPolygon:
         """Add a fillet rounding with a given radius to the provided nodes.
 
         Example:
@@ -351,8 +353,8 @@ class XYPolygon:
         # Compute differences between consecutive points
         if resolution is None:
             resolution = self.resolution
-        dx = np.diff(self.x)
-        dy = np.diff(self.y)
+        dx = np.diff(self.d1s)
+        dy = np.diff(self.d2s)
 
         # Distances between consecutive points
         dist = np.sqrt(dx**2 + dy**2)
@@ -361,13 +363,13 @@ class XYPolygon:
         keep = np.insert(dist >= resolution, 1, True)
 
         # Apply mask
-        self.x = self.x[keep]
-        self.y = self.y[keep]
+        self.d1s = self.d1s[keep]
+        self.d2s = self.d2s[keep]
         
     def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
-        """Turns the XYPolygon object into a GeoPolygon that is embedded in 3D space.
+        """Turns the _2DPolygon object into a GeoPolygon that is embedded in 3D space.
 
-        The polygon will be placed in the XY-plane of the provided coordinate center.
+        The polygon will be placed in the 2D-plane of the provided coordinate center.
 
         Args:
             cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
@@ -375,47 +377,12 @@ class XYPolygon:
         Returns:
             GeoPolygon: The resultant 3D GeoPolygon object.
         """
-        self._check()
+        raise NotImplementedError
 
-        ptags = []
-        
-        xg, yg, zg = cs.in_global_cs(self.x, self.y, 0*self.x)
-
-        points = dict()
-        for x,y,z in zip(xg, yg, zg):
-            reuse = False
-            for key, (px, py, pz) in points.items():
-                if ((x-px)**2 + (y-py)**2 + (z-pz)**2)**0.5 < 1e-12:
-                    ptags.append(key)
-                    reuse = True
-                    break
-            if reuse:
-                logger.warning(f'Reusing {ptags[-1]}')
-                continue
-            ptag = gmsh.model.occ.add_point(x,y,z)
-            points[ptag] = (x,y,z)
-            ptags.append(ptag)
-        
-        lines = []
-        for i1, p1 in enumerate(ptags):
-            p2 = ptags[(i1+1) % len(ptags)]
-            lines.append(gmsh.model.occ.add_line(p1, p2))
-        
-        add = 0
-        for radius, index in self.fillets:
-            t1 = lines[(index + add-1) % len(lines)]
-            t2 = lines[index + add]
-            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
-            lines.insert(index, tag)
-            add += 1
-
-        wiretag = gmsh.model.occ.add_wire(lines)
-        return ptags, lines, wiretag
-        
     def _finalize(self, cs: CoordinateSystem, name: str | None = 'GeoPolygon') -> GeoPolygon:
-        """Turns the XYPolygon object into a GeoPolygon that is embedded in 3D space.
+        """Turns the _2DPolygon object into a GeoPolygon that is embedded in 3D space.
 
-        The polygon will be placed in the XY-plane of the provided coordinate center.
+        The polygon will be placed in the plane of the provided coordinate center.
 
         Args:
             cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
@@ -433,9 +400,9 @@ class XYPolygon:
         return poly
     
     def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
-        """Extrues the polygon along the Z-axis.
-        The z-coordinates go from z1 to z2 (in meters). Then the extrusion
-        is either provided by a maximum dz distance (in meters) or a number
+        """Extrudes the polygon along the third axis.
+        The coordinates go from c1 to c2 (in meters). Then the extrusion
+        is either provided by a maximum dc distance (in meters) or a number
         of sections N.
 
         Args:
@@ -444,16 +411,8 @@ class XYPolygon:
         Returns:
             GeoVolume: The resultant Volumetric object.
         """
-        if cs is None:
-            cs = GCS
-        poly_fin = self._finalize(cs)
-        zax = length*cs.zax.np
-        poly_fin._exists = False
-        volume = gmsh.model.occ.extrude(poly_fin.dimtags, zax[0], zax[1], zax[2])
-        tags = [t for d,t in volume if d==3]
-        surftags = [t for d,t in volume if d==2]
-        return GeoPrism(tags, surftags[0], surftags, name=name)
-    
+        raise NotImplementedError
+
     def geo(self, cs: CoordinateSystem | None = None, name: str = 'GeoPolygon') -> GeoPolygon:
         """Returns a GeoPolygon object for the current polygon.
 
@@ -470,7 +429,7 @@ class XYPolygon:
         return self._finalize(cs) 
     
     def revolve(self, cs: CoordinateSystem, origin: tuple[float, float, float], axis: tuple[float, float,float], angle: float = 360.0, name: str = 'Revolution') -> GeoPrism:
-        """Applies a revolution to the XYPolygon along the provided rotation ais
+        """Applies a revolution to the _2DPolygon along the provided rotation axis
 
         Args:
             cs (CoordinateSystem, optional): _description_. Defaults to None.
@@ -492,25 +451,25 @@ class XYPolygon:
         poly_fin.remove()
         return GeoPrism(tags, _axis=axis, name=name)
 
-    @staticmethod
-    def circle(radius: float, 
+    def circle(self,
+               radius: float,
                dsmax: float | None= None,
                tolerance: float | None = None,
                Nsections: int | None = None):
         """This method generates a segmented circle.
 
-        The number of points along the circumpherence can be specified in 3 ways. By a maximum
-        circumpherential length (dsmax), by a radial tolerance (tolerance) or by a number of 
+        The number of points along the circumference can be specified in 3 ways. By a maximum
+        circumferential length (dsmax), by a radial tolerance (tolerance) or by a number of
         sections (Nsections).
 
         Args:
             radius (float): The circle radius
-            dsmax (float, optional): The maximum circumpherential angle. Defaults to None.
+            dsmax (float, optional): The maximum circumferential angle. Defaults to None.
             tolerance (float, optional): The maximum radial error. Defaults to None.
             Nsections (int, optional): The number of sections. Defaults to None.
 
         Returns:
-            XYPolygon: The XYPolygon object.
+            _2DPolygon: The _2DPolygon object.
         """
         if Nsections is not None:
             N = Nsections+1
@@ -522,93 +481,313 @@ class XYPolygon:
         angs = np.linspace(0,2*np.pi,N)
 
         xs = radius*np.cos(angs[:-1])
-        ys = radius*np.sin(angs[:-1])
-        return XYPolygon(xs, ys)
+        zs = radius*np.sin(angs[:-1])
+        return self.__class__(xs, zs)
 
-    @staticmethod
-    def rect(width: float,
+    def rect(self,
+             width: float,
              height: float,
              origin: tuple[float, float],
-             alignment: Alignment = Alignment.CORNER) -> XYPolygon:
-        """Create a rectangle in the XY-plane as polygon
+             alignment: Alignment = Alignment.CORNER) -> _2DPolygon:
+        """Create a rectangle in the same plane as the original polygon
 
         Args:
-            width (float): The width (X)
-            height (float): The height (Y)
-            origin (tuple[float, float]): The origin (x,y)
+            width (float): The width (dim1)
+            height (float): The height (dim2)
+            origin (tuple[float, float]): The origin (dim1, dim2)
             alignment (Alignment, optional): What point the origin describes. Defaults to Alignment.CORNER.
 
         Returns:
-            XYPolygon: A new XYpolygon object
+            _2DPolygon: A new _2DPolygon object
         """
         if alignment is Alignment.CORNER:
-            x0, y0 = origin
+            d1_0, d2_0 = origin
         else:
-            x0 = origin[0]-width/2
-            y0 = origin[1]-height/2
-        xs = np.array([x0, x0, x0 + width, x0+width])
-        ys = np.array([y0, y0+height, y0+height, y0])
-        return XYPolygon(xs, ys)
-    
-    def parametric(self, xfunc: Callable,
-                   yfunc: Callable,
-                   xmin: float = 1e-3,
+            d1_0 = origin[0]-width/2
+            d2_0 = origin[1]-height/2
+        d1s = np.array([d1_0, d1_0, d1_0 + width, d1_0+width])
+        d2s = np.array([d2_0, d2_0+height, d2_0+height, d2_0])
+        return self.__class__(d1s, d2s)
+
+    def parametric(self,
+                   d1func: Callable,
+                   d2func: Callable,
+                   d1min: float = 1e-3,
                    tolerance: float = 1e-5,
                    tmin: float = 0,
                    tmax: float = 1,
-                   reverse: bool = False) -> XYPolygon:
+                   reverse: bool = False) -> _2DPolygon:
         """Adds the points of a parametric curve to the polygon.
         The parametric curve is defined by two parametric functions of a parameter t that (by default) lives in the interval from [0,1].
-        thus the curve x(t) = xfunc(t), and y(t) = yfunc(t).
+        thus the curve d1(t) = d1func(t), and d2(t) = d2func(t).
 
         The tolerance indicates a maximum deviation from the true path.
 
         Args:
-            xfunc (Callable): The x-coordinate function.
-            yfunc (Callable): The y-coordinate function
+            d1func (Callable): The d1-coordinate function.
+            d2func (Callable): The d2-coordinate function
             tolerance (float): A maximum distance tolerance. Defaults to 10um.
             tmin (float, optional): The start value of the t-parameter. Defaults to 0.
             tmax (float, optional): The end value of the t-parameter. Defaults to 1.
             reverse (bool, optional): Reverses the curve.
 
         Returns:
-            XYPolygon: _description_
+            _2DPolygon: The new _2DPolygon object with the added points
         """
-        xs, ys = _discretize_curve(xfunc, yfunc, tmin, tmax, xmin, tolerance)
+        d1s, d2s = _discretize_curve(d1func, d2func, tmin, tmax, d1min, tolerance)
 
         if reverse:
-            xs = xs[::-1]
-            ys = ys[::-1]
-        self.extend(xs, ys)
+            d1s = d1s[::-1]
+            d2s = d2s[::-1]
+        self.extend(d1s, d2s)
         return self
-    
-    def connect(self, other: XYPolygon, name: str = 'Connection') -> GeoVolume:
-        """Connect two XYPolygons with a defined coordinate system
+
+    def connect(self, other: _2DPolygon, name: str = 'Connection') -> GeoVolume:
+        """Connect two _2DPolygons with a defined coordinate system
 
         The coordinate system must be defined before this function can be used. To add a coordinate systme without
         rendering the Polygon to a GeoVolume, use:
         >>> polygon.incs(my_cs_obj)
-        
+
         Args:
-            other (XYPolygon): _descrThe otheiption_
+            other (_2DPolygon): other object to connect to
 
         Returns:
             GeoVolume: The resultant volume object
         """
+        if self.__class__ != other.__class__:
+            raise ValueError(f'Other object is not an {self.__class__.__name__}.')
+
         if self._cs is None:
-            raise RuntimeError('Cannot connect XYPolygons without a defined coordinate system. Set this first using .incs()')
+            raise RuntimeError(f'Cannot connect {self.__class__.__name__}s without a defined coordinate system. Set this first using .incs()')
         if other._cs is None:
-            raise RuntimeError('Cannot connect XYPolygons without a defined coordinate system. Set this first using .incs()')
+            raise RuntimeError(f'Cannot connect {self.__class__.__name__}s without a defined coordinate system. Set this first using .incs()')
         p1, l1, w1 = self._make_wire(self._cs)
         p2, l2, w2 = other._make_wire(other._cs)
         o1 = np.array(self._cs.in_global_cs(*self.center, 0)).flatten()
         o2 = np.array(other._cs.in_global_cs(*other.center, 0)).flatten()
         dts = gmsh.model.occ.addThruSections([w1, w2], True, parametrization="IsoParametric")
         vol = GeoVolume([t for d,t in dts if d==3], name=name)
-        
+
         vol._add_face_pointer('front',o1, self._cs.zax.np)
         vol._add_face_pointer('back', o2, other._cs.zax.np)
         return vol
+
+class XYPolygon(_2DPolygon):
+
+    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
+        """Turns the XYPolygon object into a GeoPolygon that is embedded in 3D space.
+
+        The polygon will be placed in the XY-plane of the provided coordinate center.
+
+        Args:
+            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
+
+        Returns:
+            GeoPolygon: The resultant 3D GeoPolygon object.
+        """
+        self._check()
+
+        ptags = []
+
+        xg, yg, zg = cs.in_global_cs(self.d1s, self.d2s, 0 * self.d1s)
+
+        points = dict()
+        for x, y, z in zip(xg, yg, zg):
+            reuse = False
+            for key, (px, py, pz) in points.items():
+                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
+                    ptags.append(key)
+                    reuse = True
+                    break
+            if reuse:
+                logger.warning(f'Reusing {ptags[-1]}')
+                continue
+            ptag = gmsh.model.occ.add_point(x, y, z)
+            points[ptag] = (x, y, z)
+            ptags.append(ptag)
+
+        lines = []
+        for i1, p1 in enumerate(ptags):
+            p2 = ptags[(i1 + 1) % len(ptags)]
+            lines.append(gmsh.model.occ.add_line(p1, p2))
+
+        add = 0
+        for radius, index in self.fillets:
+            t1 = lines[(index + add - 1) % len(lines)]
+            t2 = lines[index + add]
+            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
+            lines.insert(index, tag)
+            add += 1
+
+        wiretag = gmsh.model.occ.add_wire(lines)
+        return ptags, lines, wiretag
+
+    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
+        """Extrues the polygon along the third axis.
+        The coordinates go from x to y (in meters). Then the extrusion
+        is either provided by a maximum dc distance (in meters) or a number
+        of sections N.
+
+        Args:
+            length (length): The length of the extrusion.
+
+        Returns:
+            GeoVolume: The resultant Volumetric object.
+        """
+        if cs is None:
+            cs = GCS
+        poly_fin = self._finalize(cs)
+        zax = length*cs.zax.np
+        poly_fin._exists = False
+        volume = gmsh.model.occ.extrude(poly_fin.dimtags, zax[0], zax[1], zax[2])
+        tags = [t for d,t in volume if d==3]
+        surftags = [t for d,t in volume if d==2]
+        return GeoPrism(tags, surftags[0], surftags, name=name)
+
+class XZPolygon(_2DPolygon):
+
+    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
+        """Turns the XZPolygon object into a GeoPolygon that is embedded in 3D space.
+
+        The polygon will be placed in the XZ-plane of the provided coordinate center.
+
+        Args:
+            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
+
+        Returns:
+            GeoPolygon: The resultant 3D GeoPolygon object.
+        """
+        self._check()
+
+        ptags = []
+
+        xg, yg, zg = cs.in_global_cs(self.d1s, 0 * self.d1s, self.d2s)
+
+        points = dict()
+        for x, y, z in zip(xg, yg, zg):
+            reuse = False
+            for key, (px, py, pz) in points.items():
+                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
+                    ptags.append(key)
+                    reuse = True
+                    break
+            if reuse:
+                logger.warning(f'Reusing {ptags[-1]}')
+                continue
+            ptag = gmsh.model.occ.add_point(x, y, z)
+            points[ptag] = (x, y, z)
+            ptags.append(ptag)
+
+        lines = []
+        for i1, p1 in enumerate(ptags):
+            p2 = ptags[(i1 + 1) % len(ptags)]
+            lines.append(gmsh.model.occ.add_line(p1, p2))
+
+        add = 0
+        for radius, index in self.fillets:
+            t1 = lines[(index + add - 1) % len(lines)]
+            t2 = lines[index + add]
+            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
+            lines.insert(index, tag)
+            add += 1
+
+        wiretag = gmsh.model.occ.add_wire(lines)
+        return ptags, lines, wiretag
+
+    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
+        """Extrudes the polygon along the third axis.
+        The coordinates go from y1 to y2 (in meters). Then the extrusion
+        is either provided by a maximum dc distance (in meters) or a number
+        of sections N.
+
+        Args:
+            length (length): The length of the extrusion.
+
+        Returns:
+            GeoVolume: The resultant Volumetric object.
+        """
+        if cs is None:
+            cs = GCS
+        poly_fin = self._finalize(cs)
+        yax = length*cs.yax.np
+        poly_fin._exists = False
+        volume = gmsh.model.occ.extrude(poly_fin.dimtags, yax[0], yax[1], yax[2])
+        tags = [t for d,t in volume if d==3]
+        surftags = [t for d,t in volume if d==2]
+        return GeoPrism(tags, surftags[0], surftags, name=name)
+
+class YZPolygon(_2DPolygon):
+
+    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
+        """Turns the YZPolygon object into a GeoPolygon that is embedded in 3D space.
+
+        The polygon will be placed in the YZ-plane of the provided coordinate center.
+
+        Args:
+            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
+
+        Returns:
+            GeoPolygon: The resultant 3D GeoPolygon object.
+        """
+        self._check()
+
+        ptags = []
+
+        xg, yg, zg = cs.in_global_cs(0 * self.d1s, self.d1s, self.d2s)
+
+        points = dict()
+        for x, y, z in zip(xg, yg, zg):
+            reuse = False
+            for key, (px, py, pz) in points.items():
+                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
+                    ptags.append(key)
+                    reuse = True
+                    break
+            if reuse:
+                logger.warning(f'Reusing {ptags[-1]}')
+                continue
+            ptag = gmsh.model.occ.add_point(x, y, z)
+            points[ptag] = (x, y, z)
+            ptags.append(ptag)
+
+        lines = []
+        for i1, p1 in enumerate(ptags):
+            p2 = ptags[(i1 + 1) % len(ptags)]
+            lines.append(gmsh.model.occ.add_line(p1, p2))
+
+        add = 0
+        for radius, index in self.fillets:
+            t1 = lines[(index + add - 1) % len(lines)]
+            t2 = lines[index + add]
+            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
+            lines.insert(index, tag)
+            add += 1
+
+        wiretag = gmsh.model.occ.add_wire(lines)
+        return ptags, lines, wiretag
+
+    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
+        """Extrudes the polygon along the third axis.
+        The coordinates go from x1 to x2 (in meters). Then the extrusion
+        is either provided by a maximum dc distance (in meters) or a number
+        of sections N.
+
+        Args:
+            length (length): The length of the extrusion.
+
+        Returns:
+            GeoVolume: The resultant Volumetric object.
+        """
+        if cs is None:
+            cs = GCS
+        poly_fin = self._finalize(cs)
+        xax = length*cs.xax.np
+        poly_fin._exists = False
+        volume = gmsh.model.occ.extrude(poly_fin.dimtags, xax[0], xax[1], xax[2])
+        tags = [t for d,t in volume if d==3]
+        surftags = [t for d,t in volume if d==2]
+        return GeoPrism(tags, surftags[0], surftags, name=name)
             
 class Disc(GeoSurface):
     _default_name: str = 'Disc'
@@ -636,8 +815,7 @@ class Disc(GeoSurface):
         
         disc = gmsh.model.occ.addDisk(*origin, radius, radius_opt, zAxis=axis, xAxis=axis_opt)
         super().__init__(disc, name=name)
-    
-    
+
 class Curve(GeoEdge):
     _default_name: str = 'Curve'
     
@@ -665,7 +843,6 @@ class Curve(GeoEdge):
             weights (list[float] | None, optional): An optional point weights list. Defaults to None.
             knots (list[float] | None, optional): A nkots list. Defaults to None.
             ctype (Literal['Spline','BSpline','Bezier'], optional): The type of curve. Defaults to 'Spline'.
-            dstart (tuple[float, float, float] | None, optional): The departure direction. Defaults to None.
         """
         self.xpts: np.ndarray = xpts
         self.ypts: np.ndarray = ypts
@@ -690,16 +867,16 @@ class Curve(GeoEdge):
         super().__init__(tags, name=name)
     
         gmsh.model.occ.synchronize()
-        p1 = gmsh.model.getValue(self.dim, self.tags[0], [0,])
-        p2 = gmsh.model.getValue(self.dim, self.tags[0], [1e-6])
-        self.dstart: tuple[float, float, float] = (p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2])
+        p1 = np.array(gmsh.model.getValue(self.dim, self.tags[0], [0,]))
+        p2 = np.array(gmsh.model.getValue(self.dim, self.tags[0], [1e-6]))
+        self.dstart: tuple[float, float, float] = tuple(p2 - p1)
     
         
     @property
     def p0(self) -> tuple[float, float, float]:
         """The start coordinate
         """
-        return (self.xpts[0], self.ypts[0], self.zpts[0])
+        return self.xpts[0], self.ypts[0], self.zpts[0]
 
     @staticmethod
     def helix_rh(pstart: tuple[float, float, float],
@@ -731,7 +908,7 @@ class Curve(GeoEdge):
         p0 = np.array(pstart)
         p1 = np.array(pend)
         dp = (p1-p0)
-        L = (dp[0]**2 + dp[1]**2 + dp[2]**2)**(0.5)
+        L = np.linalg.norm(dp)
         dp = dp/L
         
         Z, X, Y = orthonormalize(dp)
@@ -757,7 +934,6 @@ class Curve(GeoEdge):
         yp = xs*X[1] + ys*Y[1] + zs*Z[1] + p0[1]
         zp = xs*X[2] + ys*Y[2] + zs*Z[2] + p0[2]
         
-        dp = tuple(Y)
         if startfeed > 0:
             dpx, dpy, dpz = Y
             dx = Z[0]
@@ -775,8 +951,7 @@ class Curve(GeoEdge):
             xp[2] += d/2*dx
             yp[2] += d/2*dy
             zp[2] += d/2*dz
-            dp = tuple(Z)
-        
+
         return Curve(xp, yp, zp, ctype='Spline')
     
     @staticmethod
@@ -809,7 +984,7 @@ class Curve(GeoEdge):
         p0 = np.array(pstart)
         p1 = np.array(pend)
         dp = (p1-p0)
-        L = (dp[0]**2 + dp[1]**2 + dp[2]**2)**(0.5)
+        L = np.linalg.norm(dp)
         dp = dp/L
         
         Z, X, Y = orthonormalize(dp)
@@ -835,7 +1010,6 @@ class Curve(GeoEdge):
         yp = xs*X[1] + ys*Y[1] + zs*Z[1] + p0[1]
         zp = xs*X[2] + ys*Y[2] + zs*Z[2] + p0[2]
         
-        dp = tuple(Y)
         if startfeed > 0:
             dpx, dpy, dpz = Y
             dx = Z[0]
@@ -853,46 +1027,66 @@ class Curve(GeoEdge):
             xp[2] += d/2*dx
             yp[2] += d/2*dy
             zp[2] += d/2*dz
-            dp = tuple(Z)
-        
+
         return Curve(xp, yp, zp, ctype='Spline')
         
-    def pipe(self, crossection: GeoSurface | XYPolygon, 
+    def pipe(self, crossection: GeoSurface | XYPolygon | XZPolygon | YZPolygon,
              max_mesh_size: float | None = None,
              start_tangent: Axis | tuple[float, float, float] | np.ndarray | None = None,
-             x_axis: Axis | tuple[float, float, float] | np.ndarray | None = None,
+             dim1_axis: Axis | tuple[float, float, float] | np.ndarray | None = None,
              name: str = 'PipedVolume') -> GeoVolume:
-        """Extrudes a surface or XYPolygon object along the given curve
+        """Extrudes a surface or _2DPolygon object along the given curve
 
         If a GeoSurface object is used, make sure it starts at the center of the curve. This property
         can be accessed with curve_obj.p0.Alignment
-        If an XYPolygon is used, it will be automatically centered with XY=0 at the start of the curve with
-        the Z-axis align along the initial departure direction curve_obj.dstart.Alignment
+        If an _2DPolygon is used, it will be automatically centered at the plane's origin at the start of the curve with
+        the third axis aligned along the initial departure direction curve_obj.dstart.Alignment
         
         Args:
-            crossection (GeoSurface | XYPolygon): The cross section definition to be used
+            crossection (GeoSurface | _2DPolygon): The cross section definition to be used
             max_mesh_size (float, optional): The maximum mesh size. Defaults to None
             start_tangent (Axis, tuple, ndarray, optional): The input polygon plane normal direction. Defaults to None
-            x_axis (Axis, tuple, ndarray optional): The reference X-axis to align the input polygon. Defaults to None
+            dim1_axis (Axis, tuple, ndarray optional): The reference axis to align the input polygon. Defaults to None
         Returns:
             GeoVolume: The resultant volume object
         """
         if isinstance(crossection, XYPolygon):
             if start_tangent is None:
                 start_tangent = self.dstart
-            if x_axis is not None:
-                xax = _parse_axis(x_axis)
+            if dim1_axis is not None:
+                xax = _parse_axis(dim1_axis)
                 zax = _parse_axis(self.dstart)
                 yax = zax.cross(xax)
-                cs = CoordinateSystem(xax, yax, zax, self.p0)
             else:
                 zax = self.dstart
                 cs = Axis(np.array(zax)).construct_cs(self.p0)
                 surf = crossection.geo(cs)
+        elif isinstance(crossection, XZPolygon):
+            if start_tangent is None:
+                start_tangent = self.dstart
+            if dim1_axis is not None:
+                xax = _parse_axis(dim1_axis)
+                yax = _parse_axis(self.dstart)
+                zax = xax.cross(yax)
+            else:
+                yax = self.dstart
+                cs = Axis(np.array(yax)).construct_cs(self.p0)
+                surf = crossection.geo(cs)
+        elif isinstance(crossection, YZPolygon):
+            if start_tangent is None:
+                start_tangent = self.dstart
+            if dim1_axis is not None:
+                yax = _parse_axis(dim1_axis)
+                zax = _parse_axis(self.dstart)
+                xax = yax.cross(zax)
+            else:
+                xax = self.dstart
+                cs = Axis(np.array(xax)).construct_cs(self.p0)
+                surf = crossection.geo(cs)
         else:
             surf = crossection
-        x1, y1, z1, x2, y2, z2 = gmsh.model.occ.getBoundingBox(*surf.dimtags[0])
-        diag = ((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2)**(0.5)
+        pt1, pt2 = np.array(gmsh.model.occ.getBoundingBox(*surf.dimtags[0])).reshape(2, 3)
+        diag = np.linalg.norm(pt2 - pt1)
         pipetag = gmsh.model.occ.addPipe(surf.dimtags, self.tags[0], 'GuidePlan')
         self.remove()
         surf.remove()
