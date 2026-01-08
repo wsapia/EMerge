@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from ..cs import CoordinateSystem, GCS, Axis
 from ..geometry import GeoPolygon, GeoVolume, GeoSurface
-from ..material import Material, AIR, COPPER, PEC
+from emsutil import Material, AIR, PEC, COPPER
 from .shapes import Box, Plate, Cylinder, Alignment
 from .polybased import XYPolygon
 from .operations import change_coordinate_system, unite

@@ -33,7 +33,7 @@ Nmodes = 5
 
 # --- Create simulation ---------------------------------------------------
 model = em.Simulation('DielectricResonatorFilter')
-model.check_version("1.4.0") # Checks version compatibility.
+model.check_version("2.0.1") # Checks version compatibility.
 
 # --- Build geometry ------------------------------------------------------
 # Metal enclosure box (PEC by default)
@@ -84,13 +84,13 @@ for mode_index in range(Nmodes):
     # Plot E-field vectors in red and H-field vectors in blue
     Evec = field.vector('E', 'real')
     Hvec = field.vector('H', 'real')
-    model.display.add_quiver(*Evec, color='red')
-    model.display.add_quiver(*Hvec, color='green')
+    model.display.add_field(Evec, color='red')
+    model.display.add_field(Hvec, color='green')
     # Annotate resonant frequency and field labels
     freq_ghz = data.field[mode_index].freq.real / 1e9
     model.display.add_title(f'Mode {mode_index+1}: {freq_ghz:.3f} GHz')
     model.display.add_text('E-field', color='red', abs_position=(0, 0.95))
     model.display.add_text('H-field', color='green', abs_position=(0, 0.9))
-    model.display.add_surf(*data.field[mode_index].cutplane(2*mm, y=0).scalar('normS'))
+    model.display.add_field(data.field[mode_index].cutplane(2*mm, y=0).scalar('normS'))
     # Render each mode one at a time
     model.display.show()

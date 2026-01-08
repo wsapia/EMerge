@@ -15,6 +15,8 @@
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
 
+# Last Cleanup: 2026-01-04
+
 from __future__ import annotations
 from enum import Enum
 from loguru import logger
@@ -77,7 +79,7 @@ class BoundaryCondition:
         return self.__repr__()
     
     def check_dimension(self, tags: list[tuple[int,int]]) -> None:
-        # check if all tags have the same timension (dim, tag)
+        # check if all tags have the same dimension (dim, tag)
         if not isinstance(tags, list):
             raise TypeError(f'Argument tags must be of type list, instead its {type(tags)}')
         if len(tags) == 0:
@@ -147,6 +149,14 @@ class BoundaryConditionSet:
         self.boundary_conditions = [bc for bc in self.boundary_conditions if len(bc.tags)>0]
         
     def _construct_bc(self, constructor: type) -> type:
+        """ A helper function to construct boundary condition objects and assign them to this set.
+
+        Args:
+            constructor (type): The boundary condition constructor.
+
+        Returns:
+            type: The constructed boundary condition.
+        """
         def constr(*args, **kwargs):
             obj = constructor(*args, **kwargs)
             self.assign(obj)
@@ -206,20 +216,15 @@ class BoundaryConditionSet:
         """
         if bc in self.boundary_conditions:
             return
+        
         self._initialized = True
-        wordmap = {
-            0: 'point',
-            1: 'edge',
-            2: 'face',
-            3: 'domain'
-        }
 
         bc.add_tags(bc.selection.dimtags)
 
         for existing_bc in self.boundary_conditions:
             excluded = existing_bc.exclude_bc(bc)
             if excluded:
-                logger.debug(f'Removed the {excluded} tags from {wordmap[bc.dim]} BC {existing_bc}')
+                logger.debug(f'Removed the {excluded} tags from object with dimension {bc.dim} BC {existing_bc}')
         self.boundary_conditions.append(bc)
 
 class Periodic(BoundaryCondition):

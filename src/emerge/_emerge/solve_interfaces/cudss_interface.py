@@ -72,7 +72,14 @@ def is_complex_symmetric(A, rtol=1e-12, atol=0.0):
 #                         INTERFACE                        #
 ############################################################
 
-class CuDSSInterface:
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+    
+class CuDSSInterface(metaclass=Singleton):
     """the CuDSSInterface class implements the nvmath bindings and cupy
     control for EMerge.
     """

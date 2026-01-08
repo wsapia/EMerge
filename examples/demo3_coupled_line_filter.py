@@ -39,7 +39,8 @@ extra = 100             # extra margin (mil)
 
 # --- Simulation setup ----------------------------------------------------
 model = em.Simulation('CoupledLineFilter')
-model.check_version("1.4.0") # Checks version compatibility.
+
+model.check_version("2.0.1") # Checks version compatibility.
 # --- Material and layouter -----------------------------------------------
 mat = em.Material(er=3.55, color="#488343", opacity=0.4)
 
@@ -130,5 +131,5 @@ model.display.add_portmode(port1, k0=field.k0)
 model.display.add_portmode(port2, k0=field.k0)
 model.display.add_object(diel)
 model.display.add_object(stripline)
-model.display.add_surf(*field.cutplane(1*mm, z=-0.5*th*mil).scalar('Ez','real'), symmetrize=True)
+model.display.add_field(field.cutplane(1*mm, z=-0.5*th*mil).scalar('Ez','real'), symmetrize=True)
 model.display.show()

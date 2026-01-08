@@ -857,7 +857,7 @@ def compute_error_single(nodes, tets, tris, edges, centers,
                          pec_tris,
                          k0,) -> np.ndarray:
 
-    tet_is_pec = np.zeros((tris.shape[1],), dtype=np.bool)
+    tet_is_pec = np.zeros((tris.shape[1],), dtype=np.bool_)
     tet_is_pec[pec_tris] = True
 
     # CONSTANTS

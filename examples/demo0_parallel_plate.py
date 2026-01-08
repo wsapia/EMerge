@@ -32,7 +32,7 @@ box = em.geo.Box(20*mm, 20*mm, 50*mm, position=(-10*mm, -10*mm, 0))
 
 # As the box is all we need, we will say that we stop with our modelling so we can proceed
 model.commit_geometry()
-model.check_version("1.4.0")
+model.check_version("2.0.1")
 
 # Before we can generate the mesh we have to set a simulation frequency (range)
 model.mw.set_frequency(10e9)
@@ -68,7 +68,7 @@ model.display.add_object(box)
 # X, Y, and Z coordinates and the field amplitude. THis is what the .scalar() function returns. 
 # We return a complex valued field because then we can actually animate it.
 # We set symmetrize true to make sure the color range goes from -val to +val
-model.display.animate().add_surf(*data.field[0].cutplane(1*mm, y=0).scalar('Ey','complex'), symmetrize=True)
+model.display.animate().add_field(data.field[0].cutplane(1*mm, y=0).scalar('Ey','complex'), symmetrize=True)
 # With these two plots we can show the field mode that we created. 
 model.display.add_portmode(p1, k0=data.field[0].k0)
 model.display.add_portmode(p2, k0=data.field[0].k0)

@@ -42,8 +42,8 @@ rin = 12.5*mil
 lfeed = 100*mil
 
 # A usual we start our simulation file
-model = em.Simulation('ComblineFilter', loglevel='DEBUG')
-model.check_version("1.4.0") # Checks version compatibility.
+model = em.Simulation('ComblineFilter')
+model.check_version("2.0.1") # Checks version compatibility.
 
 # The filter consists of quarter lamba cylindrical pins inside an airbox.
 # First we create the airbox
@@ -93,7 +93,7 @@ port2 = model.mw.bc.ModalPort(model.select.face.near(Lbox+lfeed, 0, h), 2, modet
 
 # Finally we may create our mesh.
 model.generate_mesh()
-model.view(plot_mesh=True)
+model.view()
 
 # At last we can compute the frequency domain study
 data = model.mw.run_sweep(parallel=True)
@@ -122,11 +122,11 @@ field = data.field.find(freq=7.25e9)
 Ex, Ey, Ez = field.interpolate(X,Y,Z).E
 
 # We can add the objects we want and fields using the shown methods.
-model.display.add_object(box, opacity=0.1, show_edges=True)
+model.display.add_objects(*model.all_geos())
 model.display.add_quiver(X,Y,Z, Ex.real, Ey.real, Ez.real)
 model.display.add_object(feed1out, opacity=0.1)
 model.display.add_portmode(port1, 21)
 model.display.add_portmode(port2, 21)
 outside = box.boundary()
-model.display.add_boundary_field(outside, field.boundary(outside).scalar('normE'), opacity=0.4)
+model.display.add_field(field.boundary(outside).scalar('normE'), opacity=0.4)
 model.display.show()

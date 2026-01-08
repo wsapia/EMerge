@@ -15,9 +15,9 @@
 # along with this program; if not, see
 # <https://www.gnu.org/licenses/>.
 
-import numpy as np
+# Last Cleanup: 2026-01-04
+
 from typing import TypeVar, Generic, Any
-from loguru import logger
 from .physics.microwave.microwave_data import MWData
 from .simulation_data import DataContainer
 

@@ -29,7 +29,7 @@ def Cf(C):
 pack = '0603'         # package footprint for lumped components
 # Create simulation and PCB layouter with substrate thickness and material
 m = em.Simulation('LumpedFilter')
-m.check_version("1.4.0") # Checks version compatibility.
+m.check_version("2.0.1") # Checks version compatibility.
 
 th = 0.5         # substrate thickness (meters)
 Hair = 2.0
@@ -114,5 +114,5 @@ m.display.add_object(traces, opacity=0.1)
 # Cut-plane of Ez field through substrate center
 cut = data.field.find(freq=0.15e9)\
     .cutplane(0.1 * mm, z=-th/2 * mm)
-m.display.animate().add_surf(*cut.scalar('Ez', 'complex'), symmetrize=True)
+m.display.animate().add_field(cut.scalar('Ez', 'complex'), symmetrize=True)
 m.display.show()

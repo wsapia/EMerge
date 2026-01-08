@@ -1,12 +1,31 @@
 
+# EMerge is an open source Python based FEM EM simulation module.
+# Copyright (C) 2025  Robert Fennis.
+
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see
+# <https://www.gnu.org/licenses/>.
+
 import re
 from typing import Any
 from ..pcb import PCB, RouteException
-from ...material import Material, PEC
+from ...selection import Selection
+from ...geometry import GeoObject
+from emsutil import Material, PEC
 from ...cs import GCS, CoordinateSystem
 from loguru import logger
 from math import hypot
-
+from ...simmodel import Simulation
 try: 
     import ezdxf
     from ezdxf.recover import readfile as recover_readfile
@@ -14,6 +33,7 @@ try:
 except ImportError as e:
     logger.error('Cannot find the required ezdxf library. Install using: pip install ezdxf')
     raise e
+import numpy as np
 
 INSUNITS_TO_NAME = {
     0: "unitless",
@@ -318,7 +338,6 @@ def extract_polygons_with_meta(
 
     return items
 
-
 def import_dxf(filename: str, 
                material: Material, 
                thickness: float | None = None,
@@ -358,4 +377,226 @@ def import_dxf(filename: str,
         
         pcb.add_poly(xs, ys, z=z, name=poly['handle'])
     return pcb
+
+def _extract_polygons(nodes: np.ndarray, tris: np.ndarray, tri_ids: np.ndarray) -> list[list[tuple[float, float]]]:
+    from collections import defaultdict
+    edge_counter = defaultdict(int)
     
+    nT = tri_ids.shape[1]
+    for it in range(nT):
+        i1, i2, i3 = [int(x) for x in tri_ids[:,it]]
+        edge_counter[(min(i1,i2), max(i1,i2))] += 1
+        edge_counter[(min(i1,i3), max(i1,i3))] += 1
+        edge_counter[(min(i2,i3), max(i2,i3))] += 1
+
+    edges: list[tuple[int, int]] = [edge for edge, counter in edge_counter.items() if counter == 1]
+    
+    # stitch edges
+    
+    node_sequence = defaultdict(list)
+    
+    for i1, i2 in edges:
+        node_sequence[i1].append(i2)
+        node_sequence[i2].append(i1)
+    
+    # Extract sequence loops
+    # Node sequence maps node -> [node1, node2] but its unknon if node1 or node2 comes first:
+    
+    
+    islands = []
+    
+    while True:
+        first_node = node_sequence.keys()
+        if not first_node:
+            break
+        first_node = list(first_node)[0]
+        second_node = node_sequence[first_node][0]
+        
+        loop = [first_node, second_node]
+        
+        while True:
+            next_nodes = node_sequence[second_node]
+            next_node = next_nodes[0] if next_nodes[0] != first_node else next_nodes[1]
+            if next_node == loop[0]:
+                break
+            loop.append(next_node)
+            first_node = second_node
+            second_node = next_node
+        
+        islands.append(loop)
+        for node in loop:
+            del node_sequence[node]
+    
+    
+    # Create Polygons
+    polygons = []
+    
+    for loop in islands:
+        poly = []
+        for node in loop:
+            x = nodes[0, node]
+            y = nodes[1, node]
+            poly.append((x,y))
+        
+        # remove last point if its within 1e-8 of the first
+        if hypot(poly[0][0]-poly[-1][0], poly[0][1]-poly[-1][1]) < 1e-8:
+            poly = poly[:-1]    
+        
+        # remove all collinear points
+        simplified_poly = []
+        nP = len(poly)
+        for i in range(nP):
+            p_prev = poly[i-1]
+            p_curr = poly[i]
+            p_next = poly[(i+1)%nP]
+            
+            # vector from prev to curr
+            v1 = (p_curr[0]-p_prev[0], p_curr[1]-p_prev[1])
+            # vector from curr to next
+            v2 = (p_next[0]-p_curr[0], p_next[1]-p_curr[1])
+            
+            cross = v1[0]*v2[1] - v1[1]*v2[0]
+            if abs(cross) > 1e-10:
+                simplified_poly.append(p_curr)
+        
+        simplified_poly.append(simplified_poly[0])  # close the polygon
+        polygons.append(simplified_poly)
+    
+    return polygons
+
+def _export_dxf_single(simulation: Simulation, filename: str, z_height: float, selection: Selection | GeoObject | list[Selection | GeoObject] | None = None) -> None:
+    
+    if selection is None:
+        selection = []
+    elif isinstance(selection, (Selection, GeoObject)):
+        selection = [selection]
+    
+    all_tags = set()
+    
+    mesh = simulation.mesh
+    
+    for key in mesh.ftag_to_tri.keys():
+        all_tags.add(key)
+    
+    
+    if len(selection) > 0:
+        selected_tags = set()
+        for sel in selection:
+            selected_tags.update(sel.tags)
+        # intersect with all_tags
+        selected_tags = selected_tags.intersection(all_tags)
+    else:
+        selected_tags = all_tags
+    
+    nodes = mesh.nodes
+    tris = mesh.tris
+    
+    poly_triset = []
+    for geo in simulation.all_geos():
+        if geo.dim != 2:
+            continue
+        
+        tags = [tag for tag in geo.tags if tag in selected_tags]
+        if not tags:
+            continue
+        tri_ids = mesh.get_triangles(tags)
+        
+        polynodes = nodes[:,np.unique(tris[:,tri_ids])]
+        
+        if not np.all(np.abs(polynodes[2,:]-z_height) < 1e-8):
+            continue
+
+        poly_triset.append(tris[:,tri_ids])
+        
+    
+    # entire tri_set is on the correct z-height
+    polies: list[list] = [_extract_polygons(nodes, tris, triset) for triset in poly_triset]
+    
+    # Reduce polies to a single list of polygons
+    final_polies = []
+    for polyset in polies:
+        for poly in polyset:
+            
+            final_polies.append(poly)
+    
+    if not final_polies:
+        logger.warning(f'No 2D geometry found at z={z_height} to export to DXF.')
+        return
+    doc = ezdxf.new(dxfversion='R2010')
+    msp = doc.modelspace()
+    for poly in final_polies:
+        # add as solid region
+        
+        msp.add_lwpolyline(poly, close=True, dxfattribs={'layer': 'F.Cu'})
+    # add .dxf if it is not thetere
+    if not filename.lower().endswith('.dxf'):
+        filename += '.dxf'
+        
+    doc.saveas(filename)
+    return
+
+def pcb_to_dxf(pcb: PCB, filename: str) -> None:
+    """Exports all PCB traces to a DXF file.
+
+    Args:
+        PCB (PCB): Your PCB object.
+        filename (str): The filename to save the DXF as.
+        
+    Returns:
+        None
+    """
+    
+    from collections import defaultdict
+    
+    unit = pcb.unit
+    layers: dict[float, list] = defaultdict(list)
+    for pcbpoly in pcb._poly_out:
+        xs = list(np.array(pcbpoly.xs)*unit)
+        ys = list(np.array(pcbpoly.ys)*unit)
+        poly = [(x,y) for x,y in zip(xs, ys)]
+        # make sure the last point is the same as the first
+        if poly[0] != poly[-1]:
+            poly.append(poly[0])
+        layers[pcbpoly.z].append(poly)
+    
+    for z in layers:
+        doc = ezdxf.new(dxfversion='R2010')
+        msp = doc.modelspace()
+        
+        for poly in layers[z]:
+            msp.add_lwpolyline(poly, close=True, dxfattribs={'layer': f'Z{z:.3f}'})
+        # add .dxf if it is not thetere
+        fname_parts = filename.rsplit('.', maxsplit=1)
+        if len(fname_parts) == 2:
+            fname = f'{fname_parts[0]}_z{z:.3f}.{fname_parts[1]}'
+        else:
+            fname = f'{filename}_z{z:.3f}.dxf'
+            
+        doc.saveas(fname)
+
+def export_dxf(simulation: Simulation, filename: str, z_height: float | list[float], selection: list[Selection | GeoObject] = None) -> None:
+    """Exports all 2D Geometries on a single or multiple  z-heights to a DXF file.
+
+    Args:
+        simulation (Simulation): Your simulation object.
+        filename (str): The filename to save the DXF as.
+        z_height (float): The z-height to export the 2D geometries at.
+        
+    Returns:
+        None
+    """
+    
+    if not simulation.mesh.defined:
+        raise Exception('Cannot export DXF because the simulation mesh is not defined yet. Please run generate_mesh() first.')
+
+    if isinstance(z_height, list):
+        for zh in z_height:
+            fname_parts = filename.rsplit('.', maxsplit=1)
+            if len(fname_parts) == 2:
+                fname = f'{fname_parts[0]}_z{zh:.3f}.{fname_parts[1]}'
+            else:
+                fname = f'{filename}_z{zh:.3f}.dxf'
+            _export_dxf_single(simulation, fname, zh, selection)
+    else:
+        _export_dxf_single(simulation, filename, z_height, selection)
+    return

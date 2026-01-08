@@ -18,7 +18,7 @@
 from __future__ import annotations
 from ...simulation_data import BaseDataset, DataContainer
 from ...elements.femdata import FEMBasis
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import numpy as np
 from typing import Literal, Callable
 from loguru import logger
@@ -27,9 +27,10 @@ from ...cs import Axis, _parse_axis
 from ...selection import FaceSelection
 from ...geometry import GeoSurface
 from ...mesh3d import Mesh3D
-from ...const import Z0, MU0, EPS0
+from ...const import MU0
 from ...coord import Line
-from ....lib import EISO, EOMNI
+from emsutil.emdata import EHField, EHFieldFF
+
 EMField = Literal[
     "er", "ur", "freq", "k0",
     "_Spdata", "_Spmapping", "_field", "_basis",
@@ -249,509 +250,6 @@ class MWData:
     def setreport(self, report, **vars):
         self.sim.new(**vars)['report'] = report
 
-
-@dataclass
-class FarFieldComponent:
-    F: np.ndarray
-
-    @property
-    def x(self) -> np.ndarray:
-        return self.F[0,:]
-    
-    @property
-    def y(self) -> np.ndarray:
-        return self.F[1,:]
-    
-    @property
-    def z(self) -> np.ndarray:
-        return self.F[2,:]
-    
-    @property
-    def x(self) -> np.ndarray:
-        return self.F[0,:]
-    
-    @property
-    def y(self) -> np.ndarray:
-        return self.F[1,:]
-    
-    @property
-    def z(self) -> np.ndarray:
-        return self.F[2,:]
-    
-    @property
-    def theta(self) -> np.ndarray:
-        thx = np.cos(self.theta)*np.cos(self.phi)
-        thy = np.cos(self.theta)*np.sin(self.phi)
-        thz = -np.sin(self.theta)
-        return thx*self.F[0,:] + thy*self.F[1,:] + thz*self.F[2,:]
-    
-    @property
-    def phi(self) -> np.ndarray:
-        phx = -np.sin(self.phi)
-        phy = np.cos(self.phi)
-        phz = np.zeros_like(self.theta)
-        return phx*self.F[0,:] + phy*self.F[1,:] + phz*self.F[2,:]
-    
-    @property
-    def rhcp(self) -> np.ndarray:
-        return (self.theta + 1j*self.phi)/np.sqrt(2)
-    
-    @property
-    def lhcp(self) -> np.ndarray:
-        return (self.theta - 1j*self.phi)/np.sqrt(2)
-    
-    @property
-    def AR(self) -> np.ndarray:
-        R = np.abs(self.rhcp)
-        L = np.abs(self.lchp)
-        return (R+L)/(R-L)
-    
-    @property
-    def norm(self) -> np.ndarray:
-        return np.sqrt(np.abs(self.F[0,:])**2 + np.abs(self.F[1,:])**2 + np.abs(self.F[2,:])**2)
-    
-ETA0 = 376.730313668
-
-@dataclass
-class FarFieldData:
-    _E: np.ndarray
-    _H: np.ndarray
-    theta: np.ndarray
-    phi: np.ndarray
-    Ptot: float
-    ang: np.ndarray | None = None
-    
-    def total_radiated_power_integral(
-        self,
-        r: float = 1.0,
-        use: str = "EH",              # "EH" or "E"
-        degrees: bool | None = None,  # auto if None
-    ) -> float:
-        E = np.asarray(self._E)
-        H = np.asarray(self._H)
-        th = np.asarray(self.theta, float)
-        ph = np.asarray(self.phi, float)
-
-        if E.shape[:1] != (3,) or E.ndim != 3:
-            raise ValueError(f"_E must be (3,N,M), got {E.shape}")
-        if th.shape != E.shape[1:] or ph.shape != E.shape[1:]:
-            raise ValueError(f"theta/phi must be (N,M) matching _E[1:], got {th.shape}, {ph.shape}")
-        if use.upper() == "EH" and H.shape != E.shape:
-            raise ValueError(f"_H must match _E for use='EH', got {H.shape}")
-
-        if degrees is None:
-            degrees = (np.nanmax(th) > 2*np.pi + 0.5) or (np.nanmax(ph) > 2*np.pi + 0.5)
-        if degrees:
-            th = np.deg2rad(th)
-            ph = np.deg2rad(ph)
-
-        # rhat(θ,φ)
-        rhat = np.stack(
-            [np.sin(th) * np.cos(ph), np.sin(th) * np.sin(ph), np.cos(th)],
-            axis=0,
-        )  # (3,N,M)
-
-        # S_r
-        if use.upper() == "EH":
-            S = 0.5 * np.real(
-                np.cross(np.moveaxis(E, 0, -1), np.conj(np.moveaxis(H, 0, -1)))
-            )  # (N,M,3)
-            Sr = np.sum(S * np.moveaxis(rhat, 0, -1), axis=-1)  # (N,M)
-        elif use.upper() == "E":
-            Sr = (np.sum(np.abs(E) ** 2, axis=0) / (2.0 * ETA0)).real  # (N,M)
-        else:
-            raise ValueError("use must be 'EH' or 'E'")
-
-        # dΩ for general (θ(i,j), φ(i,j)) grid: dΩ = sinθ * |∂(θ,φ)/∂(i,j)| di dj
-        dth_di, dth_dj = np.gradient(th, edge_order=2)
-        dph_di, dph_dj = np.gradient(ph, edge_order=2)
-        J = dth_di * dph_dj - dth_dj * dph_di  # ∂(θ,φ)/∂(i,j)
-        dOmega = np.sin(th) * np.abs(J)
-
-        return float(r**2 * np.sum(Sr * dOmega))
-    
-    @property
-    def E(self) -> np.ndarray:
-        return FarFieldComponent(self._E)
-    
-    @property
-    def H(self) -> np.ndarray:
-        return FarFieldComponent(self._H)
-    
-    @property
-    def Ex(self) -> np.ndarray:
-        return self._E[0,:]
-    
-    @property
-    def Ey(self) -> np.ndarray:
-        return self._E[1,:]
-    
-    @property
-    def Ez(self) -> np.ndarray:
-        return self._E[2,:]
-    
-    @property
-    def Hx(self) -> np.ndarray:
-        return self._H[0,:]
-    
-    @property
-    def Hy(self) -> np.ndarray:
-        return self._H[1,:]
-    
-    @property
-    def Hz(self) -> np.ndarray:
-        return self._H[2,:]
-    
-    @property
-    def Etheta(self) -> np.ndarray:
-        thx = np.cos(self.theta)*np.cos(self.phi)
-        thy = np.cos(self.theta)*np.sin(self.phi)
-        thz = -np.sin(self.theta)
-        return thx*self._E[0,:] + thy*self._E[1,:] + thz*self._E[2,:]
-    
-    @property
-    def Ephi(self) -> np.ndarray:
-        phx = -np.sin(self.phi)
-        phy = np.cos(self.phi)
-        phz = np.zeros_like(self.theta)
-        return phx*self._E[0,:] + phy*self._E[1,:] + phz*self._E[2,:]
-    
-    @property
-    def Erhcp(self) -> np.ndarray:
-        return (self.Etheta + 1j*self.Ephi)/np.sqrt(2)
-    
-    @property
-    def Elhcp(self) -> np.ndarray:
-        return (self.Etheta - 1j*self.Ephi)/np.sqrt(2)
-    
-    @property
-    def AR(self) -> np.ndarray:
-        R = np.abs(self.Erhcp)
-        L = np.abs(self.Elhcp)
-        return (R+L)/(R-L)
-    
-    @property
-    def gain(self, kind: Literal['iso','omni'] = 'iso') -> FarFieldComponent:
-        if kind=='iso':
-            return FarFieldComponent(self._E/EISO)
-        else:
-            return FarFieldComponent(self._E/EOMNI)
-        
-    @property
-    def dir(self, kind: Literal['iso','omni'] = 'iso') -> FarFieldComponent:
-        if kind=='iso':
-            return FarFieldComponent(self._E/(EISO*(self.Ptot)**0.5))
-        else:
-            return FarFieldComponent(self._E/(EOMNI*(self.Ptot)**0.5))
-    
-    @property
-    def normE(self) -> np.ndarray:
-        return np.sqrt(np.abs(self._E[0,:])**2 + np.abs(self._E[1,:])**2 + np.abs(self._E[2,:])**2)
-    
-    @property
-    def normH(self) -> np.ndarray:
-        return np.sqrt(np.abs(self._H[0,:])**2 + np.abs(self._H[1,:])**2 + np.abs(self._H[2,:])**2)
-    
-    
-    def surfplot(self, 
-             polarization: Literal['Ex','Ey','Ez','Etheta','Ephi','normE','Erhcp','Elhcp','AR'],
-             quantity: Literal['abs','real','imag','angle'] = 'abs',
-             isotropic: bool = True, dB: bool = False, dBfloor: float = -30, rmax: float | None = None,
-             offset: tuple[float, float, float] = (0,0,0)) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Returns the parameters to be used as positional arguments for the display.add_surf() function.
-
-        Example:
-        >>> model.display.add_surf(*dataset.field[n].farfield_3d(...).surfplot())
-
-        Args:
-            polarization ('Ex','Ey','Ez','Etheta','Ephi','normE'): What quantity to plot
-            isotropic (bool, optional): Whether to look at the ratio with isotropic antennas. Defaults to True.
-            dB (bool, optional): Whether to plot in dB's. Defaults to False.
-            dBfloor (float, optional): The dB value to take as R=0. Defaults to -10.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: The X, Y, Z, F values
-        """
-        fmap = {
-            'abs': np.abs,
-            'real': np.real,
-            'imag': np.imag,
-            'angle': np.angle,
-        }
-        mapping = fmap.get(quantity.lower(),np.abs)
-        
-        F = mapping(getattr(self, polarization))
-        
-        if isotropic:
-            F = F/np.sqrt(Z0/(2*np.pi))
-        if dB:
-            F = 20*np.log10(np.clip(np.abs(F), a_min=10**(dBfloor/20), a_max = 1e9))-dBfloor
-        if rmax is not None:
-            F = rmax * F/np.max(F)
-        xs = F*np.sin(self.theta)*np.cos(self.phi) + offset[0]
-        ys = F*np.sin(self.theta)*np.sin(self.phi) + offset[1]
-        zs = F*np.cos(self.theta) + offset[2]
-
-        return xs, ys, zs, F
-
-@dataclass
-class EHField:
-    x: np.ndarray
-    y: np.ndarray
-    z: np.ndarray
-    Ex: np.ndarray
-    Ey: np.ndarray
-    Ez: np.ndarray
-    Hx: np.ndarray
-    Hy: np.ndarray
-    Hz: np.ndarray
-    freq: float
-    er: np.ndarray
-    ur: np.ndarray
-    aux: dict[str, np.ndarray] = field(default_factory=dict)
-    
-
-    @property
-    def k0(self) -> float:
-        return self.freq*2*np.pi/299792458
-    
-    @property
-    def Px(self) -> np.ndarray:
-        return EPS0*(self.er-1)*self.Ex
-    
-    @property
-    def Py(self) -> np.ndarray:
-        return EPS0*(self.er-1)*self.Ey
-    
-    @property
-    def Pz(self) -> np.ndarray:
-        return EPS0*(self.er-1)*self.Ez
-    
-    @property
-    def Dx(self) -> np.ndarray:
-        return self.Ex*self.er
-    
-    @property
-    def Dy(self) -> np.ndarray:
-        return self.Ey*self.er
-    
-    @property
-    def Dz(self) -> np.ndarray:
-        return self.Ez*self.er
-    
-    @property
-    def Bx(self) -> np.ndarray:
-        return self.Hx/self.ur
-    
-    @property
-    def By(self) -> np.ndarray:
-        return self.Hy/self.ur
-    
-    @property
-    def Bz(self) -> np.ndarray:
-        return self.Hz/self.ur
-    
-    @property
-    def Emat(self) -> np.ndarray:
-        return np.array([self.Ex, self.Ey, self.Ez])
-    
-    @property
-    def Hmat(self) -> np.ndarray:
-        return np.array([self.Hx, self.Hy, self.Hz])
-    
-    @property
-    def Pmat(self) -> np.ndarray:
-        return np.array([self.Px, self.Py, self.Pz])
-    
-    @property
-    def Bmat(self) -> np.ndarray:
-        return np.array([self.Bx, self.By, self.Bz])
-    
-    @property
-    def Dmat(self) -> np.ndarray:
-        return np.array([self.Dx, self.Dy, self.Dz])
-    
-    @property
-    def Smat(self) -> np.ndarray:
-        return np.array([self.Sx, self.Sy, self.Sz])
-    
-    @property
-    def Smmat(self) -> np.ndarray:
-        return np.array([self.Smx, self.Smy, self.Smz])
-    
-    @property
-    def EH(self) -> tuple[np.ndarray, np.ndarray]:
-        ''' Return the electric and magnetic field as a tuple of numpy arrays '''
-        return np.array([self.Ex, self.Ey, self.Ez]), np.array([self.Hx, self.Hy, self.Hz])
-    
-    @property
-    def E(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the electric field as a tuple of numpy arrays '''
-        return self.Ex, self.Ey, self.Ez
-    
-    @property
-    def Sx(self) -> np.ndarray:
-        return self.Ey*self.Hz - self.Ez*self.Hy
-    
-    @property
-    def Sy(self) -> np.ndarray:
-        return self.Ez*self.Hx - self.Ex*self.Hz
-    
-    @property
-    def Sz(self) -> np.ndarray:
-        return self.Ex*self.Hy - self.Ey*self.Hx
-    
-    @property
-    def Smx(self) -> np.ndarray:
-        return 0.5*(self.Ey*np.conj(self.Hz) - self.Ez*np.conj(self.Hy))
-    
-    @property
-    def Smy(self) -> np.ndarray:
-        return 0.5*(self.Ez*np.conj(self.Hx) - self.Ex*np.conj(self.Hz))
-    
-    @property
-    def Smz(self) -> np.ndarray:
-        return 0.5*(self.Ex*np.conj(self.Hy) - self.Ey*np.conj(self.Hx))
-    
-    @property
-    def B(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the magnetic field as a tuple of numpy arrays '''
-        return self.Bx, self.By, self.Bz
-    
-    @property
-    def P(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the polarization field as a tuple of numpy arrays '''
-        return self.Px, self.Py, self.Pz
-
-    @property
-    def D(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the electric displacement field as a tuple of numpy arrays '''
-        return self.Bx, self.By, self.Bz
-    
-    @property
-    def H(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the magnetic field as a tuple of numpy arrays '''
-        return self.Hx, self.Hy, self.Hz
-
-    @property
-    def S(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the poynting vector field as a tuple of numpy arrays '''
-        return self.Sx, self.Sy, self.Sz
-    
-    @property
-    def Sm(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the poynting vector field as a tuple of numpy arrays '''
-        return self.Smx, self.Smy, self.Smz
-    
-    @property
-    def normE(self) -> np.ndarray:
-        """The complex norm of the E-field
-        """
-        return np.sqrt(np.abs(self.Ex)**2 + np.abs(self.Ey)**2 + np.abs(self.Ez)**2)
-    
-    @property
-    def normH(self) -> np.ndarray:
-        """The complex norm of the H-field"""
-        return np.sqrt(np.abs(self.Hx)**2 + np.abs(self.Hy)**2 + np.abs(self.Hz)**2)
-    
-    @property
-    def normP(self) -> np.ndarray:
-        """The complex norm of the P-field
-        """
-        return np.sqrt(np.abs(self.Px)**2 + np.abs(self.Py)**2 + np.abs(self.Pz)**2)
-    
-    @property
-    def normB(self) -> np.ndarray:
-        """The complex norm of the B-field
-        """
-        return np.sqrt(np.abs(self.Bx)**2 + np.abs(self.By)**2 + np.abs(self.Bz)**2)
-    
-    @property
-    def normD(self) -> np.ndarray:
-        """The complex norm of the D-field
-        """
-        return np.sqrt(np.abs(self.Dx)**2 + np.abs(self.Dy)**2 + np.abs(self.Dz)**2)
-    
-    @property
-    def normS(self) -> np.ndarray:
-        """The complex norm of the S-field
-        """
-        return np.sqrt(np.abs(self.Sx)**2 + np.abs(self.Sy)**2 + np.abs(self.Sz)**2)
-    
-    def _get_quantity(self, field: str, metric: str) -> np.ndarray:
-        field_arry = getattr(self, field)
-        if metric=='abs':
-            field = np.abs(field_arry)
-        elif metric=='real':
-            field = field_arry.real
-        elif metric=='imag':
-            field = field_arry.imag
-        elif metric=='complex':
-            field = field_arry
-        else:
-            field = field_arry
-        return field
-    
-    def vector(self, field: Literal['E','H'], metric: Literal['real','imag','complex'] = 'real') -> tuple[np.ndarray, np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
-        """Returns the X,Y,Z,Fx,Fy,Fz data to be directly cast into plot functions.
-
-        The field can be selected by a string literal. The metric of the complex vector field by the metric.
-        For animations, make sure to always use the complex metric.
-
-        Args:
-            field ('E','H'): The field to return
-            metric ([]'real','imag','complex'], optional): the metric to impose on the field. Defaults to 'real'.
-
-        Returns:
-            tuple[np.ndarray,...]: The X,Y,Z,Fx,Fy,Fz arrays
-        """
-        Fx, Fy, Fz = getattr(self, field)
-        
-        if metric=='real':
-            Fx, Fy, Fz = Fx.real, Fy.real, Fz.real
-        elif metric=='imag':
-            Fx, Fy, Fz = Fx.imag, Fy.imag, Fz.imag
-        
-        return self.x, self.y, self.z, Fx, Fy, Fz
-    
-    def scalar(self, field: Literal['Ex','Ey','Ez','Hx','Hy','Hz','normE','normH'] | str, metric: Literal['abs','real','imag','complex'] = 'real') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Returns the data X, Y, Z, Field based on the interpolation
-
-        For animations, make sure to select the complex metric.
-
-        Args:
-            field (str): The field to plot
-            metric (str, optional): The metric to impose on the plot. Defaults to 'real'.
-
-        Returns:
-            (X,Y,Z,Field): The coordinates plus field scalar
-        """
-        if field in self.aux:
-            field_arry = self.aux[field]
-        else:
-            field_arry = getattr(self, field)
-        
-        if metric=='abs':
-            field = np.abs(field_arry)
-        elif metric=='real':
-            field = field_arry.real
-        elif metric=='imag':
-            field = field_arry.imag
-        elif metric=='complex':
-            field = field_arry
-        return self.x, self.y, self.z, field_arry
-
-    def int(self, field: str | Callable, metric: Literal['abs','real','imag','complex',''] = '') -> float | complex:
-        if isinstance(field, Callable):
-            field = field(self)
-        else:
-            field = self._get_quantity(field, metric)
-        if len(field.shape)==2:
-            axis = 1
-        else:
-            axis = 0
-        return np.sum(field*self.aux['areas']*self.aux['weights'], axis=axis)
-    
 class _EHSign:
     """A small class to manage the sign of field components when computing the far-field with Stratton-Chu
     """
@@ -809,6 +307,7 @@ class MWField:
     def __init__(self):
         self._der: np.ndarray = None
         self._dur: np.ndarray = None
+        self._dsig: np.ndarray = None
         self.freq: float = None
         self.basis: FEMBasis = None
         self._fields: dict[int, np.ndarray] = dict()
@@ -824,6 +323,7 @@ class MWField:
         self.Hz: np.ndarray = None
         self.er: np.ndarray = None
         self.ur: np.ndarray = None
+        self.sig: np.ndarray = None
 
     def add_port_properties(self, 
                             port_number: int,
@@ -897,42 +397,7 @@ class MWField:
         
         self._fields[p1] = (fp1-fp2)/np.sqrt(2)
         self._fields[p2] = (fp1+fp2)/np.sqrt(2)
-        
         return self
-        
-    @property
-    def EH(self) -> tuple[np.ndarray, np.ndarray]:
-        ''' Return the electric and magnetic field as a tuple of numpy arrays '''
-        return np.array([self.Ex, self.Ey, self.Ez]), np.array([self.Hx, self.Hy, self.Hz])
-    
-    @property
-    def E(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the electric field as a tuple of numpy arrays '''
-        return self.Ex, self.Ey, self.Ez
-    
-    @property
-    def normE(self) -> np.ndarray:
-        """The complex norm of the E-field
-        """
-        return np.sqrt(np.abs(self.Ex)**2 + np.abs(self.Ey)**2 + np.abs(self.Ez)**2)
-    
-    @property
-    def normH(self) -> np.ndarray:
-        """The complex norm of the H-field"""
-        return np.sqrt(np.abs(self.Hx)**2 + np.abs(self.Hy)**2 + np.abs(self.Hz)**2)
-    
-    @property
-    def Emat(self) -> np.ndarray:
-        return np.array([self.Ex, self.Ey, self.Ez])
-    
-    @property
-    def Hmat(self) -> np.ndarray:
-        return np.array([self.Hx, self.Hy, self.Hz])
-
-    @property
-    def H(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        ''' Return the magnetic field as a tuple of numpy arrays '''
-        return self.Hx, self.Hy, self.Hz
     
     def interpolate(self, xs: np.ndarray, ys: np.ndarray, zs: np.ndarray, usenan: bool = True) -> EHField:
         ''' Interpolate the dataset in the provided xs, ys, zs values'''
@@ -960,6 +425,8 @@ class MWField:
         
         self.er = self._der[ids].reshape(shp)
         self.ur = self._dur[ids].reshape(shp)
+        self.sig = self._dsig[ids].reshape(shp)
+        
         self.Hx = Hx.reshape(shp)
         self.Hy = Hy.reshape(shp)
         self.Hz = Hz.reshape(shp)
@@ -967,9 +434,11 @@ class MWField:
         self._x = xs
         self._y = ys
         self._z = zs
-        field = EHField(xs, ys, zs, self.Ex, self.Ey, self.Ez, self.Hx, self.Hy, self.Hz, self.freq, self.er, self.ur)
-        
-        return field
+        ehfield = EHField(_E=np.array([self.Ex, self.Ey, self.Ez]), 
+                          _H=np.array([self.Hx, self.Hy, self.Hz]),
+                          x=xs, y=ys, z=zs,
+                          freq=self.freq, er=self.er, ur=self.ur, sig=self.sig)
+        return ehfield
     
     def _solution_quality(self, solve_ids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         from .adaptive_mesh import compute_error_estimate
@@ -986,11 +455,11 @@ class MWField:
         
         X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
         
-        field = self.interpolate(X, Y, Z, False)
-        field.aux['areas'] = A
-        field.aux['weights'] = W
+        ehfield = self.interpolate(X, Y, Z, False)
+        ehfield.aux['areas'] = A
+        ehfield.aux['weights'] = W
 
-        return field
+        return ehfield
     
     def int_surf(self, surface: FaceSelection, argument: Callable, gqo: int = 4) -> EHField:
         """Performs a surface integral on the provided surface object. 
@@ -1051,13 +520,62 @@ class MWField:
         
     def boundary(self, selection: FaceSelection) -> EHField:
         """ Interpolate the field on the node coordinates of the surface."""
-        nodes = self.mesh.nodes
-        ids = self.mesh.get_nodes(selection.tags)
-        x = nodes[0,ids]
-        y = nodes[1,ids]
-        z = nodes[2,ids]
-        field = self.interpolate(x, y, z, False)
-        return field
+        boundary = self.mesh.boundary_surface(selection.tags)
+        x = boundary.nodes[0,:]
+        y = boundary.nodes[1,:]
+        z = boundary.nodes[2,:]
+        ehfield = self.interpolate(x, y, z, False)
+        ehfield.aux['tris'] = boundary.tris
+        ehfield.aux['boundary'] = True
+        return ehfield
+    
+    def current_boundary(self, selection: FaceSelection) -> EHField:
+        """ Interpolate the field on the node coordinates of the surface."""
+        boundary = self.mesh.boundary_surface(selection.tags)
+        ns = boundary.normals
+        cs = (boundary.nodes[:,boundary.tris[0,:]]+boundary.nodes[:,boundary.tris[1,:]]+boundary.nodes[:,boundary.tris[2,:]])/3
+        
+        nx = ns[0,:]
+        ny = ns[1,:]
+        nz = ns[2,:]
+        cx = cs[0,:]
+        cy = cs[1,:]
+        cz = cs[2,:]
+        
+        eps = 1e-6
+        
+        ehfield_1 = self.interpolate(cx-nx*eps, cy-ny*eps, cz-nz*eps, False)
+        ehfield_2 = self.interpolate(cx+nx*eps, cy+ny*eps, cz+nz*eps, False)
+        
+        dHx = ehfield_2.Hx - ehfield_1.Hx
+        dHy = ehfield_2.Hy - ehfield_1.Hy
+        dHz = ehfield_2.Hz - ehfield_1.Hz
+        
+        Jsx = ny*dHz - nz*dHy
+        Jsy = nz*dHx - nx*dHz
+        Jsz = nx*dHy - ny*dHx
+        
+        Jst = np.array([Jsx, Jsy, Jsz])
+        
+        Js = np.zeros_like(boundary.nodes, dtype=np.complex128)
+        Js_counter = np.zeros((boundary.n_nodes,), dtype=np.int8)
+        
+        ehfield = self.interpolate(boundary.nodes[0,:], boundary.nodes[1,:], boundary.nodes[2,:], False)
+        
+        for i in range(boundary.n_tris):
+            nids = boundary.tris[:,i]
+            Js[:,nids] += Jst[:,i]
+            Js_counter[nids] += 1
+        
+        Js_counter[Js_counter==0] = 1
+        
+        Js = Js/Js_counter
+        
+        
+        ehfield._Js = Js
+        ehfield.aux['tris'] = boundary.tris
+        ehfield.aux['boundary'] = True
+        return ehfield
     
     def cutplane(self, 
                      ds: float,
@@ -1215,7 +733,7 @@ class MWField:
                          ang_range: tuple[float, float] = (-180, 180),
                          Npoints: int = 201,
                          origin: tuple[float, float, float] | None = None,
-                         syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> FarFieldData:#tuple[np.ndarray, np.ndarray, np.ndarray]:
+                         syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> EHFieldFF:#tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute the farfield electric and magnetic field defined by a circle.
 
         Args:
@@ -1235,14 +753,14 @@ class MWField:
         theta, phi = arc_on_plane(refdir, plane_normal_parsed, ang_range, Npoints)
         E,H,Ptot = self.farfield(theta, phi, faces, origin, syms = syms)
         angs = np.linspace(*ang_range, Npoints)*np.pi/180
-        return FarFieldData(E, H, theta, phi, Ptot, ang=angs)
+        return EHFieldFF(_E=E, _H=H, theta=theta, phi=phi, Ptot=Ptot, ang=angs)
 
     def farfield_3d(self, 
                     faces: FaceSelection | GeoSurface,
                     thetas: np.ndarray | None = None,
                     phis: np.ndarray | None = None,
                     origin: tuple[float, float, float] | None = None,
-                    syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> FarFieldData:
+                    syms: list[Literal['Ex','Ey','Ez', 'Hx','Hy','Hz']] | None = None) -> EHFieldFF:
         """Compute the farfield in a 3D angular grid
 
         If thetas and phis are not provided, they default to a sample space of 2 degrees.
@@ -1267,7 +785,7 @@ class MWField:
         E = E.reshape((3, ) + T.shape)
         H = H.reshape((3, ) + T.shape)
         
-        return FarFieldData(E, H, T, P, Ptot)
+        return EHFieldFF(E, H, T, P, Ptot)
         
     def farfield(self, theta: np.ndarray,
                  phi: np.ndarray,
@@ -1293,39 +811,22 @@ class MWField:
         
         surface = self.basis.mesh.boundary_surface(faces.tags, origin)
         
-        field = self.interpolate(*surface.exyz)
+        ehfield = self.interpolate(*surface.exyz)
         
-        Eff, Hff, wns = stratton_chu(field.E, field.H, surface, theta, phi, self.k0)
-        
-        Ptot = np.sum(field.Smx*wns[0,:] + field.Smy*wns[1,:] + field.Smz*wns[2,:]).real
-        
-        # ### VERSION 2
-        # from ...mth.optimized import generate_int_data_tri
-        # from ...mth.integrals import gaus_quad_tri
-        
-        # DPTS = gaus_quad_tri(5)
-        # tris = self.mesh.get_triangles(faces.tags)
-        
-        # X, Y, Z, W, A, shape = generate_int_data_tri(self.mesh.nodes, self.mesh.tris[:,tris], DPTS)
-        
-        # ehfield = self.interpolate(X, Y, Z, False)
-        # X, Y, Z, W, A = [Q.reshape(shape) for Q in [X, Y, Z, W, A]]
-        # Sx = np.sum(W*A*ehfield.Smx.reshape(shape), axis=0)
-        # Sy = np.sum(W*A*ehfield.Smy.reshape(shape), axis=0)
-        # Sz = np.sum(W*A*ehfield.Smz.reshape(shape), axis=0)
-        
-        
-        # Ptot = np.sum(Sx*surface.normals[0,:] + Sy*surface.normals[1,:] + Sz*surface.normals[2,:]).real
-        # print('PTOT2:', Ptot)
-        
+        Eff, Hff, wns = stratton_chu(ehfield.E, ehfield.H, surface, theta, phi, self.k0)
+
+        Ptot = np.sum(ehfield.Smx*wns[0,:] + ehfield.Smy*wns[1,:] + ehfield.Smz*wns[2,:]).real
+
         if len(syms)==0:
             return Eff, Hff, Ptot
 
         if len(syms)==1:
             perms = ((syms[0], '##', '##'),)
+            
         elif len(syms)==2:
             s1, s2 = syms
             perms = ((s1, '##', '##'), (s2, '##', '##'), (s1, s2, '##'))
+            
         elif len(syms)==3:
             s1, s2, s3 = syms
             perms = ((s1, '##', '##'), (s2, '##', '##'), (s3, '##', '##'), (s1, s2, '##'), (s1, s3, '##'), (s2, s3, '##'), (s1, s2, s3))
@@ -1336,7 +837,7 @@ class MWField:
             ehf.apply(s1)
             ehf.apply(s2)
             ehf.apply(s3)
-            Ef, Hf = ehf.flip_field(field.E, field.H)
+            Ef, Hf = ehf.flip_field(ehfield.E, ehfield.H)
             surf.flip(s1[1])
             surf.flip(s2[1])
             surf.flip(s3[1])
@@ -1669,83 +1170,3 @@ class MWScalarNdim:
         
         logger.info('Export complete!')
         
-# class MWSimData(SimData[MWConstants]):
-#     """The MWSimData class contains all EM simulation data from a Time Harmonic simulation
-#     along all sweep axes.
-#     """
-#     datatype: type = MWConstants
-#     def __init__(self):
-#         super().__init__()
-#         self._injections = dict()
-#         self._axis = 'freq'
-
-#     def __getitem__(self, field: EMField) -> np.ndarray:
-#         return getattr(self, field)
-
-#     @property
-#     def mesh(self) -> Mesh3D:
-#         """Returns the relevant mesh object for this dataset assuming they are all the same.
-
-#         Returns:
-#             Mesh3D: The mesh object.
-#         """
-#         return self.datasets[0].basis.mesh
-    
-#     def howto(self) -> None:
-#         """To access data in the MWSimData class use the .ax method to extract properties selected
-#         along an access of global variables. The axes are all global properties that the MWDataSets manage.
-        
-#         For example the following would return all S(2,1) parameters along the frequency axis.
-        
-#         >>> freq, S21 = dataset.ax('freq').S(2,1)
-
-#         Alternatively, one can manually select any solution indexed in order of generation using.
-
-#         >>> S21 = dataset.item(3).S(2,1)
-
-#         To find the E or H fields at any coordinate, one can use the Dataset's .interpolate method. 
-#         This method returns the same Dataset object after which the computed fields can be accessed.
-
-#         >>> Ex = dataset.item(3).interpolate(xs,ys,zs).Ex
-
-#         Lastly, to find the solutions for a given frequency or other value, you can also just call the dataset
-#         class:
-        
-#         >>> Ex, Ey, Ez = dataset(freq=1e9).interpolate(xs,ys,zs).E
-
-#         """
-
-#     def select(self, **axes: EMField) -> MWSimData:
-#         """Takes the provided axis points and constructs a new dataset only for those axes values
-
-#         Returns:
-#             MWSimData: The new dataset
-#         """
-#         newdata = MWSimData()
-#         for dataset in self.datasets:
-#             if dataset.equals(**axes):
-#                 newdata.datasets.append(dataset)
-#         return newdata
-    
-#     def ax(self, *field: EMField) -> MWConstants:
-#         """Return a MWDataSet proxy object that you can request properties for along a provided axis.
-
-#         The MWSimData class contains a list of MWDataSet objects. Any global variable like .freq of the 
-#         MWDataSet object can be used as inner-axes after which the outer axis can be selected as if
-#         you are extract a single one.
-
-#         Args:
-#             field (EMField): The global field variable to select the data along
-
-#         Returns:
-#             MWDataSet: An MWDataSet object (actually a proxy for)
-
-#         Example:
-#         The following will select all S11 parameters along the frequency axis:
-
-#         >>> freq, S11 = dataset.ax('freq').S(1,1)
-
-#         """
-#         # find the real DataSet
-#         return _DataSetProxy(field, self.datasets)
-
