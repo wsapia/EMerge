@@ -633,7 +633,7 @@ _YZCS = CoordinateSystem((0,1,0),(0,0,1),(1,0,0))
 _XZCS = CoordinateSystem((1,0,0),(0,0,1),(0,1,0))
 
 
-class XZPolygon(_2DPolygon):
+class XYPolygon(_2DPolygon):
     _DEFAULT_CS: CoordinateSystem = _XYCS
 
 
