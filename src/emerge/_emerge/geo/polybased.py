@@ -252,6 +252,8 @@ class _2DPolygon:
     """This class generalizes a polygon in an un-embedded 2D space that can be embedded in 3D space.
     """
 
+    _DEFAULT_CS: CoordinateSystem | None = None
+
     def __init__(self,
                  d1s: np.ndarray | list | tuple | None = None,
                  d2s: np.ndarray | list | tuple | None = None,
@@ -382,7 +384,42 @@ class _2DPolygon:
         Returns:
             GeoPolygon: The resultant 3D GeoPolygon object.
         """
-        raise NotImplementedError
+        self._check()
+
+        ptags = []
+
+        xg, yg, zg = cs.in_global_cs(self.d1s, self.d2s, 0 * self.d1s)
+
+        points = dict()
+        for pt1 in zip(xg, yg, zg):
+            reuse = False
+            for key, pt2 in points.items():
+                if np.linalg.norm(np.diff([pt1, pt2])) < 1e-12:
+                    ptags.append(key)
+                    reuse = True
+                    break
+            if reuse:
+                logger.warning(f'Reusing {ptags[-1]}')
+                continue
+            ptag = gmsh.model.occ.add_point(*pt1)
+            points[ptag] = pt1
+            ptags.append(ptag)
+
+        lines = []
+        for i1, p1 in enumerate(ptags):
+            p2 = ptags[(i1 + 1) % len(ptags)]
+            lines.append(gmsh.model.occ.add_line(p1, p2))
+
+        add = 0
+        for radius, index in self.fillets:
+            t1 = lines[(index + add - 1) % len(lines)]
+            t2 = lines[index + add]
+            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
+            lines.insert(index, tag)
+            add += 1
+
+        wiretag = gmsh.model.occ.add_wire(lines)
+        return ptags, lines, wiretag
 
     def _finalize(self, cs: CoordinateSystem, name: str | None = 'GeoPolygon') -> GeoPolygon:
         """Turns the _2DPolygon object into a GeoPolygon that is embedded in 3D space.
@@ -404,20 +441,6 @@ class _2DPolygon:
         poly.lines = lines
         return poly
 
-    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
-        """Extrudes the polygon along the third axis.
-        The coordinates go from c1 to c2 (in meters). Then the extrusion
-        is either provided by a maximum dc distance (in meters) or a number
-        of sections N.
-
-        Args:
-            length (length): The length of the extrusion.
-
-        Returns:
-            GeoVolume: The resultant Volumetric object.
-        """
-        raise NotImplementedError
-
     def geo(self, cs: CoordinateSystem | None = None, name: str = 'GeoPolygon') -> GeoPolygon:
         """Returns a GeoPolygon object for the current polygon.
 
@@ -428,10 +451,10 @@ class _2DPolygon:
             GeoPolygon: The resultant object.
         """
         if self._cs is not None:
-            return self._finalize(self._cs)
+            return self._finalize(self._cs, name=name)
         if cs is None:
             cs = GCS
-        return self._finalize(cs)
+        return self._finalize(cs, name=name)
 
     def revolve(self, cs: CoordinateSystem, origin: tuple[float, float, float], axis: tuple[float, float, float],
                 angle: float = 360.0, name: str = 'Revolution') -> GeoPrism:
@@ -446,7 +469,7 @@ class _2DPolygon:
         """
         if cs is None:
             cs = GCS
-        poly_fin = self._finalize(cs)
+        poly_fin = self._finalize(cs, name=name)
 
         x, y, z = origin
         ax, ay, az = axis
@@ -581,57 +604,6 @@ class _2DPolygon:
         vol._add_face_pointer('back', o2, other._cs.zax.np)
         return vol
 
-
-class XYPolygon(_2DPolygon):
-
-    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
-        """Turns the XYPolygon object into a GeoPolygon that is embedded in 3D space.
-
-        The polygon will be placed in the XY-plane of the provided coordinate center.
-
-        Args:
-            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
-
-        Returns:
-            GeoPolygon: The resultant 3D GeoPolygon object.
-        """
-        self._check()
-
-        ptags = []
-
-        xg, yg, zg = cs.in_global_cs(self.d1s, self.d2s, 0 * self.d1s)
-
-        points = dict()
-        for x, y, z in zip(xg, yg, zg):
-            reuse = False
-            for key, (px, py, pz) in points.items():
-                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
-                    ptags.append(key)
-                    reuse = True
-                    break
-            if reuse:
-                logger.warning(f'Reusing {ptags[-1]}')
-                continue
-            ptag = gmsh.model.occ.add_point(x, y, z)
-            points[ptag] = (x, y, z)
-            ptags.append(ptag)
-
-        lines = []
-        for i1, p1 in enumerate(ptags):
-            p2 = ptags[(i1 + 1) % len(ptags)]
-            lines.append(gmsh.model.occ.add_line(p1, p2))
-
-        add = 0
-        for radius, index in self.fillets:
-            t1 = lines[(index + add - 1) % len(lines)]
-            t2 = lines[index + add]
-            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
-            lines.insert(index, tag)
-            add += 1
-
-        wiretag = gmsh.model.occ.add_wire(lines)
-        return ptags, lines, wiretag
-
     def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
         """Extrues the polygon along the third axis.
         The coordinates go from x to y (in meters). Then the extrusion
@@ -645,160 +617,32 @@ class XYPolygon(_2DPolygon):
             GeoVolume: The resultant Volumetric object.
         """
         if cs is None:
-            cs = GCS
-        poly_fin = self._finalize(cs)
-        zax = length * cs.zax.np
+            cs = self._DEFAULT_CS
+
+        poly_fin = self._finalize(cs, name=name)
+        extrude_ax = length * cs.zax.np
         poly_fin._exists = False
-        volume = gmsh.model.occ.extrude(poly_fin.dimtags, zax[0], zax[1], zax[2])
+        volume = gmsh.model.occ.extrude(poly_fin.dimtags, *extrude_ax)
         tags = [t for d, t in volume if d == 3]
         surftags = [t for d, t in volume if d == 2]
         return GeoPrism(tags, surftags[0], surftags, name=name)
+
+
+_XYCS = CoordinateSystem((1,0,0),(0,1,0), (0,0,1))
+_YZCS = CoordinateSystem((0,1,0),(0,0,1),(1,0,0))
+_XZCS = CoordinateSystem((1,0,0),(0,0,1),(0,1,0))
 
 
 class XZPolygon(_2DPolygon):
-
-    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
-        """Turns the XZPolygon object into a GeoPolygon that is embedded in 3D space.
-
-        The polygon will be placed in the XZ-plane of the provided coordinate center.
-
-        Args:
-            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
-
-        Returns:
-            GeoPolygon: The resultant 3D GeoPolygon object.
-        """
-        self._check()
-
-        ptags = []
-
-        xg, yg, zg = cs.in_global_cs(self.d1s, 0 * self.d1s, self.d2s)
-
-        points = dict()
-        for x, y, z in zip(xg, yg, zg):
-            reuse = False
-            for key, (px, py, pz) in points.items():
-                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
-                    ptags.append(key)
-                    reuse = True
-                    break
-            if reuse:
-                logger.warning(f'Reusing {ptags[-1]}')
-                continue
-            ptag = gmsh.model.occ.add_point(x, y, z)
-            points[ptag] = (x, y, z)
-            ptags.append(ptag)
-
-        lines = []
-        for i1, p1 in enumerate(ptags):
-            p2 = ptags[(i1 + 1) % len(ptags)]
-            lines.append(gmsh.model.occ.add_line(p1, p2))
-
-        add = 0
-        for radius, index in self.fillets:
-            t1 = lines[(index + add - 1) % len(lines)]
-            t2 = lines[index + add]
-            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
-            lines.insert(index, tag)
-            add += 1
-
-        wiretag = gmsh.model.occ.add_wire(lines)
-        return ptags, lines, wiretag
-
-    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
-        """Extrudes the polygon along the third axis.
-        The coordinates go from y1 to y2 (in meters). Then the extrusion
-        is either provided by a maximum dc distance (in meters) or a number
-        of sections N.
-
-        Args:
-            length (length): The length of the extrusion.
-
-        Returns:
-            GeoVolume: The resultant Volumetric object.
-        """
-        if cs is None:
-            cs = GCS
-        poly_fin = self._finalize(cs)
-        yax = length * cs.yax.np
-        poly_fin._exists = False
-        volume = gmsh.model.occ.extrude(poly_fin.dimtags, yax[0], yax[1], yax[2])
-        tags = [t for d, t in volume if d == 3]
-        surftags = [t for d, t in volume if d == 2]
-        return GeoPrism(tags, surftags[0], surftags, name=name)
+    _DEFAULT_CS: CoordinateSystem = _XYCS
 
 
 class YZPolygon(_2DPolygon):
+    _DEFAULT_CS: CoordinateSystem = _YZCS
 
-    def _make_wire(self, cs: CoordinateSystem) -> tuple[list[int], list[int], int]:
-        """Turns the YZPolygon object into a GeoPolygon that is embedded in 3D space.
 
-        The polygon will be placed in the YZ-plane of the provided coordinate center.
-
-        Args:
-            cs (CoordinateSystem, optional): The coordinate system in which to put the polygon. Defaults to None.
-
-        Returns:
-            GeoPolygon: The resultant 3D GeoPolygon object.
-        """
-        self._check()
-
-        ptags = []
-
-        xg, yg, zg = cs.in_global_cs(0 * self.d1s, self.d1s, self.d2s)
-
-        points = dict()
-        for x, y, z in zip(xg, yg, zg):
-            reuse = False
-            for key, (px, py, pz) in points.items():
-                if ((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2) ** 0.5 < 1e-12:
-                    ptags.append(key)
-                    reuse = True
-                    break
-            if reuse:
-                logger.warning(f'Reusing {ptags[-1]}')
-                continue
-            ptag = gmsh.model.occ.add_point(x, y, z)
-            points[ptag] = (x, y, z)
-            ptags.append(ptag)
-
-        lines = []
-        for i1, p1 in enumerate(ptags):
-            p2 = ptags[(i1 + 1) % len(ptags)]
-            lines.append(gmsh.model.occ.add_line(p1, p2))
-
-        add = 0
-        for radius, index in self.fillets:
-            t1 = lines[(index + add - 1) % len(lines)]
-            t2 = lines[index + add]
-            tag = gmsh.model.occ.fillet2_d(t1, t2, radius)
-            lines.insert(index, tag)
-            add += 1
-
-        wiretag = gmsh.model.occ.add_wire(lines)
-        return ptags, lines, wiretag
-
-    def extrude(self, length: float, cs: CoordinateSystem | None = None, name: str = 'Extrusion') -> GeoPrism:
-        """Extrudes the polygon along the third axis.
-        The coordinates go from x1 to x2 (in meters). Then the extrusion
-        is either provided by a maximum dc distance (in meters) or a number
-        of sections N.
-
-        Args:
-            length (length): The length of the extrusion.
-
-        Returns:
-            GeoVolume: The resultant Volumetric object.
-        """
-        if cs is None:
-            cs = GCS
-        poly_fin = self._finalize(cs)
-        xax = length * cs.xax.np
-        poly_fin._exists = False
-        volume = gmsh.model.occ.extrude(poly_fin.dimtags, xax[0], xax[1], xax[2])
-        tags = [t for d, t in volume if d == 3]
-        surftags = [t for d, t in volume if d == 2]
-        return GeoPrism(tags, surftags[0], surftags, name=name)
+class XZPolygon(_2DPolygon):
+    _DEFAULT_CS: CoordinateSystem = _XZCS
 
 
 class Disc(GeoSurface):
